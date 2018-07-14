@@ -192,7 +192,7 @@ On average holding to expiration performed best and stopping out too early perfo
 ```r
 df_heatmap <- all_loss_table %>%
   dplyr::bind_rows(summarise_all(., funs(if (is.numeric(.)) mean(.) else "_Mean"))) %>%
-  data.table::melt(., id = 1, measure = 2:6)
+  data.table::melt(., id = 1, measure = 2:7)
 
 ggplot(df_heatmap, aes(variable, symbol)) +
   geom_tile(aes(fill = value) , color = "white") +
@@ -203,7 +203,7 @@ ggplot(df_heatmap, aes(variable, symbol)) +
         legend.text = element_text(size = 12),
         plot.title = element_text(size = 16),
         axis.title = element_text(size = 14,face = "bold"),
-        axis.text.x = element_text(angle = 45, hjust = 1)) +
+        axis.text.x = element_text(angle = 90, hjust = 1)) +
   labs(fill = "Exit")
 ```
 
