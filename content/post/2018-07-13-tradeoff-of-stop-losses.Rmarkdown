@@ -4,7 +4,7 @@ author: Jason Taylor
 date: '2018-07-13'
 slug: tradeoff-of-stop-losses
 summary: Stop losses are a popular strategy used by traders to achieve better performance
-  by closing out of a losing trade. But do they work
+  by closing out of a losing trade. But do they work?
 categories:
   - Tastytrade
 tags:
@@ -31,7 +31,7 @@ first attempt at recreating a Market Measure study and will be the basis of the 
 ```{r global_options, include = TRUE, results = FALSE}
 knitr::opts_chunk$set(message = FALSE, tidy.opts = list(width.cutoff = 60)) 
 suppressWarnings(suppressMessages(suppressPackageStartupMessages({
-  library_list <- c("tastytrade", "dplyr", "ggplot2", "plotly", "gridExtra")
+  library_list <- c("tastytrade", "dplyr", "ggplot2", "plotly")
   lapply(library_list, require, character.only = TRUE)})))
 
 stock_list <- c("SPY", "IWM", "GLD", "QQQ", "DIA", "TLT", "XLE", "EEM",
@@ -175,16 +175,24 @@ grouped_plot(group_two_returns)
 
 #### This heat map shows the outcomes by stop loss type the darker the color the better the outcome  
 These are ranked from (1-6) 1 being best  
-On average holding to expiration performed best and stopping out too early performed the worst as seen in the mean total row at the top.
+On average holding to expiration performed best and stopping out too early performed the worst as seen in the mean row at the bottom.  
 
-```{r heatmap, warning = FALSE}
-heat_map_data <- all_loss_table %>%
-  dplyr::bind_rows(summarise_all(., funs(if (is.numeric(.)) mean(.) else "Mean Total"))) %>%
-  tibble::remove_rownames(.) %>%
-  tibble::column_to_rownames(var = "symbol")
-heat_map_data <- as.matrix(heat_map_data)
+```{r heatmap, warning = FALSE, fig.width = 8, fig.height = 8}
+df_heatmap <- all_loss_table %>%
+  dplyr::bind_rows(summarise_all(., funs(if (is.numeric(.)) mean(.) else "_Mean"))) %>%
+  data.table::melt(., id = 1, measure = 2:6)
 
-plot_ly(x = colnames(heat_map_data), y = rownames(heat_map_data), 
-        z = heat_map_data, type = "heatmap", 
-        colors = colorRamp(c("red", "yellow")))
+ggplot(df_heatmap, aes(variable, symbol)) +
+  geom_tile(aes(fill = value) , color = "white") +
+  scale_fill_gradient(low = "steelblue", high = "white") +
+  ylab("Symbol") +
+  xlab("Exit") +
+  theme(legend.title = element_text(size = 10),
+        legend.text = element_text(size = 12),
+        plot.title = element_text(size = 16),
+        axis.title = element_text(size = 14,face = "bold"),
+        axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(fill = "Exit")
 ```
+
+
