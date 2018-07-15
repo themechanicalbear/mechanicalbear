@@ -31,7 +31,7 @@ first attempt at recreating a Market Measure study and will be the basis of the 
 ```{r global_options, include = TRUE, results = FALSE}
 knitr::opts_chunk$set(message = FALSE, tidy.opts = list(width.cutoff = 60)) 
 suppressWarnings(suppressMessages(suppressPackageStartupMessages({
-  library_list <- c("tastytrade", "dplyr", "ggplot2", "plotly")
+  library_list <- c("tastytrade", "dplyr", "ggplot2", "here", "purrr", "tidyr", "data.table")
   lapply(library_list, require, character.only = TRUE)})))
 
 stock_list <- c("SPY", "IWM", "GLD", "QQQ", "DIA", "TLT", "XLE", "EEM",

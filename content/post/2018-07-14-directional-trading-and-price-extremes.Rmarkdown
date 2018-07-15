@@ -1,0 +1,158 @@
+---
+title: Directional Trading and Price Extremes
+author: Jason Taylor
+date: '2018-07-14'
+draft: TRUE
+slug: directional-trading-and-price-extremes
+summary: How do naked short options perform after large price movements and at price extremes?
+categories:
+  - Tastytrade
+tags: []
+header:
+  caption: ''
+  image: ''
+---
+
+### Market Measures - July 11, 2018
+
+How do naked short options perform after large price movements and at price extremes?
+
+*Let’s compare selling naked options into multiple days of trading in one direction to a large weekly move.*  
+*The tastytrade Research Department used 45 DTE options to see if the following setup worked from 2005 to now.*  
+*If the market went lower, we sold a 30 delta put, and if it went higher, we sold a 30 delta call.*  
+*We find that that selling puts into weakness (either measured by days or % moves) did yield a substantial profit.*  
+*Selling calls into strength yielded decent profits when waiting for large percentage moves up over number of up days.*  
+
+Here I will recreate this study and extend it to include more underlyings again with emphasis on learning new coding practices. As always recreating the Market Measure study will be done utilizing the tastytrade package on  [github](https://github.com/themechanicalbear/tastytrade).
+
+#### Setup global options, load libraries:
+
+```{r global_options, include = TRUE, results = FALSE}
+knitr::opts_chunk$set(message = FALSE, tidy.opts = list(width.cutoff = 60)) 
+suppressWarnings(suppressMessages(suppressPackageStartupMessages({
+  library_list <- c("tastytrade", "dplyr", "ggplot2", "here", "purrr", "tidyr", "data.table")
+  lapply(library_list, require, character.only = TRUE)})))
+
+stock_list <- c("SPY", "IWM", "GLD", "QQQ", "DIA", "TLT", "XLE", "EEM",
+                "MA", "FB", "FXI", "SLV", "EWZ", "FXE", "TBT", "IBM")
+tar_dte <- 45
+tar_delta_put <- -.30
+tar_delta_call <- .30
+all_closes <- data.frame()
+all_loss_table <- data.frame()
+all_results <- data.frame()
+```
+
+#### Study function
+
+```{r study}
+# Consecutive down days (1, 2, 3) and all days
+# Weekly move greater than (1, 2, 3 %)
+
+# Calculate win rate as percentage
+# Calculate Avg. P/L in $
+
+# 30 delta calls in up moves and 30 delta puts in down moves
+
+# Symbol (SPY)
+```
+
+```{r find down days}
+stock <- "SPY"
+options <- readRDS(paste0(here::here(), "/data/options/", stock, ".RDS")) %>%
+  dplyr::mutate(mid = (bid + ask) / 2)
+down_days <- options %>%
+  dplyr::distinct(quotedate, close) %>%
+  dplyr::arrange(quotedate) %>%
+  dplyr::mutate(down_one = ifelse(close < lag(close, 1), 1, 0),
+                down_two = ifelse(close < lag(close, 2), 1, 0),
+                down_three = ifelse(close < lag(close, 3), 1, 0))
+
+down_one <- dplyr::filter(down_days, down_one == 1)
+down_two <- dplyr::filter(down_days, down_one == 1) %>%
+  dplyr::filter(down_two == 1)
+down_three <- dplyr::filter(down_days, down_one == 1) %>%
+  dplyr::filter(down_two == 1) %>%
+  dplyr::filter(down_three == 1)
+```
+
+```{r find up days}
+up_days <- options %>%
+  dplyr::distinct(quotedate, close) %>%
+  dplyr::arrange(quotedate) %>%
+  dplyr::mutate(up_one = ifelse(close > lag(close, 1), 1, 0),
+                up_two = ifelse(close > lag(close, 2), 1, 0),
+                up_three = ifelse(close > lag(close, 3), 1, 0))
+
+up_one <- dplyr::filter(up_days, up_one == 1)
+up_two <- dplyr::filter(up_days, up_one == 1) %>%
+  dplyr::filter(up_two == 1)
+up_three <- dplyr::filter(up_days, up_one == 1) %>%
+  dplyr::filter(up_two == 1) %>%
+  dplyr::filter(up_three == 1)
+```
+
+```{r find down week percentages}
+weekly_change <- options %>%
+  dplyr::distinct(quotedate, close) %>%
+  dplyr::arrange(quotedate) %>%
+  dplyr::mutate(year = lubridate::year(quotedate),
+                week = lubridate::week(quotedate)) %>%
+  dplyr::group_by(year, week) %>%
+  dplyr::mutate(rank = rank(quotedate)) %>%
+  dplyr::filter(rank == min(rank) | rank == max(rank)) %>%
+  dplyr::mutate(delta = close - lag(close, 1)) %>%
+  dplyr::mutate(delta  = ifelse(is.na(delta), max(delta, na.rm = TRUE), delta)) %>%
+  dplyr::filter(rank == 1) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(return = (delta / close) * 100)%>% 
+  dplyr::filter(!return == "-Inf")
+
+wk_dwn_one_pct <-  dplyr::filter(weekly_change, return <= -1)
+wk_dwn_two_pct <-  dplyr::filter(weekly_change, return <= -2)
+wk_dwn_three_pct <-  dplyr::filter(weekly_change, return <= -3)
+
+wk_up_one_pct <-  dplyr::filter(weekly_change, return >= 1)
+wk_up_two_pct <-  dplyr::filter(weekly_change, return >= 2)
+wk_up_three_pct <-  dplyr::filter(weekly_change, return >= 3)
+```
+
+```{r sell puts 3 consecutive down days}
+options_filtered <- options %>%
+  dplyr::filter(quotedate %in% down_three$quotedate) %>%
+  dplyr::mutate(m_dte = abs(dte - tar_dte))
+
+short_put_opens <- tastytrade::open_short_put(options_filtered, "SPY", tar_delta_put)
+```
+
+```{r close puts 3 consecutive down days}
+possible_closes <- function(date, exp, p_strike, credit) {
+  closes <- options %>%
+    dplyr::filter(expiration == exp, 
+                  quotedate == exp) %>%
+    dplyr::filter((strike == p_strike & type == "put")) %>%
+    dplyr::group_by(quotedate) %>%
+    dplyr::mutate(open_date = as.Date(date, origin = "1970-01-01"),
+                  open_credit = credit,
+                  debit = sum(mid),
+                  profit = open_credit - debit) %>%
+    dplyr::ungroup() %>%
+    dplyr::select(symbol, quotedate, expiration, open_date, open_credit,
+                  debit, profit) %>%
+    dplyr::distinct()
+  
+  all_closes <<- rbind(all_closes, closes)
+}
+
+invisible(purrr::pmap(list(short_put_opens$quotedate, short_put_opens$expiration,
+                           short_put_opens$strike_put, short_put_opens$mid_put), 
+                      possible_closes))
+
+results <- dplyr::left_join(down_three, all_closes, by = c("quotedate" = "open_date"))
+
+
+```
+
+
+
+
