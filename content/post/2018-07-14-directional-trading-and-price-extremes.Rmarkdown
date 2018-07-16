@@ -30,7 +30,8 @@ Here I will recreate this study and extend it to include more underlyings again 
 ```{r global_options, include = TRUE, results = FALSE}
 knitr::opts_chunk$set(message = FALSE, tidy.opts = list(width.cutoff = 60)) 
 suppressWarnings(suppressMessages(suppressPackageStartupMessages({
-  library_list <- c("tastytrade", "dplyr", "ggplot2", "here", "purrr", "tidyr", "data.table")
+  library_list <- c("tastytrade", "dplyr", "ggplot2", "here", "purrr", "tidyr",
+                    "data.table")
   lapply(library_list, require, character.only = TRUE)})))
 
 stock_list <- c("SPY", "IWM", "GLD", "QQQ", "DIA", "TLT", "XLE", "EEM",
@@ -38,9 +39,10 @@ stock_list <- c("SPY", "IWM", "GLD", "QQQ", "DIA", "TLT", "XLE", "EEM",
 tar_dte <- 45
 tar_delta_put <- -.30
 tar_delta_call <- .30
-all_closes <- data.frame()
-all_loss_table <- data.frame()
-all_results <- data.frame()
+# down_3_days_results <- data.frame()
+# all_closes <- data.frame()
+# all_loss_table <- data.frame()
+# all_results <- data.frame()
 ```
 
 #### Study function
@@ -57,42 +59,41 @@ all_results <- data.frame()
 # Symbol (SPY)
 ```
 
-```{r find down days}
+#### Data
+
+```{r data}
 stock <- "SPY"
 options <- readRDS(paste0(here::here(), "/data/options/", stock, ".RDS")) %>%
-  dplyr::mutate(mid = (bid + ask) / 2)
-down_days <- options %>%
+  dplyr::mutate(mid = (bid + ask) / 2,
+                m_dte = abs(dte - tar_dte))
+
+each_day <- dplyr::distinct(options, quotedate, close)
+```
+
+#### Find consecutive move days
+
+```{r find consecutive days}
+consecutive_days <- options %>%
   dplyr::distinct(quotedate, close) %>%
   dplyr::arrange(quotedate) %>%
   dplyr::mutate(down_one = ifelse(close < lag(close, 1), 1, 0),
                 down_two = ifelse(close < lag(close, 2), 1, 0),
-                down_three = ifelse(close < lag(close, 3), 1, 0))
-
-down_one <- dplyr::filter(down_days, down_one == 1)
-down_two <- dplyr::filter(down_days, down_one == 1) %>%
-  dplyr::filter(down_two == 1)
-down_three <- dplyr::filter(down_days, down_one == 1) %>%
-  dplyr::filter(down_two == 1) %>%
-  dplyr::filter(down_three == 1)
-```
-
-```{r find up days}
-up_days <- options %>%
-  dplyr::distinct(quotedate, close) %>%
-  dplyr::arrange(quotedate) %>%
-  dplyr::mutate(up_one = ifelse(close > lag(close, 1), 1, 0),
+                down_three = ifelse(close < lag(close, 3), 1, 0),
+                up_one = ifelse(close > lag(close, 1), 1, 0),
                 up_two = ifelse(close > lag(close, 2), 1, 0),
                 up_three = ifelse(close > lag(close, 3), 1, 0))
 
-up_one <- dplyr::filter(up_days, up_one == 1)
-up_two <- dplyr::filter(up_days, up_one == 1) %>%
-  dplyr::filter(up_two == 1)
-up_three <- dplyr::filter(up_days, up_one == 1) %>%
-  dplyr::filter(up_two == 1) %>%
-  dplyr::filter(up_three == 1)
+down_one <- dplyr::filter(consecutive_days, down_one == 1)
+down_two <- dplyr::filter(consecutive_days, down_one == 1, down_two == 1)
+down_three <- dplyr::filter(consecutive_days, down_one == 1, down_two == 1, down_three == 1)
+
+up_one <- dplyr::filter(consecutive_days, up_one == 1)
+up_two <- dplyr::filter(consecutive_days, up_one == 1, up_two == 1)
+up_three <- dplyr::filter(consecutive_days, up_one == 1, up_two == 1, up_three == 1)
 ```
 
-```{r find down week percentages}
+#### Find weekly percentage changes
+```{r find week percentages}
 weekly_change <- options %>%
   dplyr::distinct(quotedate, close) %>%
   dplyr::arrange(quotedate) %>%
@@ -102,55 +103,71 @@ weekly_change <- options %>%
   dplyr::mutate(rank = rank(quotedate)) %>%
   dplyr::filter(rank == min(rank) | rank == max(rank)) %>%
   dplyr::mutate(delta = close - lag(close, 1)) %>%
-  dplyr::mutate(delta  = ifelse(is.na(delta), max(delta, na.rm = TRUE), delta)) %>%
+  dplyr::mutate(delta = ifelse(is.na(delta), max(delta, na.rm = TRUE), delta)) %>%
   dplyr::filter(rank == 1) %>%
   dplyr::ungroup() %>%
   dplyr::mutate(return = (delta / close) * 100)%>% 
   dplyr::filter(!return == "-Inf")
 
-wk_dwn_one_pct <-  dplyr::filter(weekly_change, return <= -1)
-wk_dwn_two_pct <-  dplyr::filter(weekly_change, return <= -2)
-wk_dwn_three_pct <-  dplyr::filter(weekly_change, return <= -3)
+wk_dwn_one <-  dplyr::filter(weekly_change, return <= -1)
+wk_dwn_two <-  dplyr::filter(weekly_change, return <= -2)
+wk_dwn_three <-  dplyr::filter(weekly_change, return <= -3)
 
-wk_up_one_pct <-  dplyr::filter(weekly_change, return >= 1)
-wk_up_two_pct <-  dplyr::filter(weekly_change, return >= 2)
-wk_up_three_pct <-  dplyr::filter(weekly_change, return >= 3)
+wk_up_one <-  dplyr::filter(weekly_change, return >= 1)
+wk_up_two <-  dplyr::filter(weekly_change, return >= 2)
+wk_up_three <-  dplyr::filter(weekly_change, return >= 3)
 ```
 
-```{r sell puts 3 consecutive down days}
-options_filtered <- options %>%
-  dplyr::filter(quotedate %in% down_three$quotedate) %>%
-  dplyr::mutate(m_dte = abs(dte - tar_dte))
+#### Sell puts consecutive down days
 
-short_put_opens <- tastytrade::open_short_put(options_filtered, "SPY", tar_delta_put)
+```{r sell puts consecutive down days}
+opens_all_days <- tastytrade::open_short_put(options, "SPY", tar_delta_put)
 ```
 
-```{r close puts 3 consecutive down days}
-possible_closes <- function(date, exp, p_strike, credit) {
-  closes <- options %>%
-    dplyr::filter(expiration == exp, 
-                  quotedate == exp) %>%
-    dplyr::filter((strike == p_strike & type == "put")) %>%
-    dplyr::group_by(quotedate) %>%
-    dplyr::mutate(open_date = as.Date(date, origin = "1970-01-01"),
-                  open_credit = credit,
-                  debit = sum(mid),
-                  profit = open_credit - debit) %>%
-    dplyr::ungroup() %>%
-    dplyr::select(symbol, quotedate, expiration, open_date, open_credit,
-                  debit, profit) %>%
-    dplyr::distinct()
-  
-  all_closes <<- rbind(all_closes, closes)
-}
+#### Close puts consecutive down days
 
-invisible(purrr::pmap(list(short_put_opens$quotedate, short_put_opens$expiration,
-                           short_put_opens$strike_put, short_put_opens$mid_put), 
-                      possible_closes))
+```{r close puts consecutive down days}
+all_days_results <- purrr::pmap_dfr(list(list(options),
+                                         opens_all_days$quotedate,
+                                         opens_all_days$expiration,
+                                         opens_all_days$strike_put,
+                                         opens_all_days$mid_put), 
+                                    tastytrade::close_short_put_exp) %>%
+  dplyr::right_join(each_day, by = c("open_date" = "quotedate")) %>%
+  dplyr::filter(complete.cases(.))
 
-results <- dplyr::left_join(down_three, all_closes, by = c("quotedate" = "open_date"))
+# Filter results to those in each group
+down_3_days_results <- dplyr::filter(all_days_results, open_date %in% unique(opens_down_3_days$quotedate))
+down_2_days_results <- dplyr::filter(all_days_results, open_date %in% unique(opens_down_2_days$quotedate))
+down_1_days_results <- dplyr::filter(all_days_results, open_date %in% unique(opens_down_1_days$quotedate))
+down_3_pct_results <- dplyr::filter(all_days_results, open_date %in% wk_dwn_three$quotedate)
+down_2_pct_results <- dplyr::filter(all_days_results, open_date %in% wk_dwn_two$quotedate)
+down_1_pct_results <- dplyr::filter(all_days_results, open_date %in% wk_dwn_one$quotedate)
+```
 
+#### Results of the down days
 
+```{r results down days}
+# Win rates and average P/L per trade
+mean_pl_3 <- mean(down_3_days_results$profit)
+win_rate_3 <- nrow(dplyr::filter(down_3_days_results, profit > 0)) / 
+  nrow(down_3_days_results)
+mean_pl_2 <- mean(down_2_days_results$profit)
+win_rate_2 <- nrow(dplyr::filter(down_2_days_results, profit > 0)) / 
+  nrow(down_2_days_results)
+mean_pl_1 <- mean(down_1_days_results$profit)
+win_rate_1 <- nrow(dplyr::filter(down_1_days_results, profit > 0)) / 
+  nrow(down_1_days_results)
+mean_pl_all <- mean(all_days_results$profit)
+win_rate_all <- nrow(dplyr::filter(all_days_results, profit > 0)) / 
+  nrow(all_days_results)
+
+down_days_results <- data.frame(metric = c("Win Rate", "Avg. P/L"),
+                                all_days = c(win_rate_all, mean_pl_all),
+                                one_day = c(win_rate_1, mean_pl_1),
+                                two_days = c(win_rate_2, mean_pl_2),
+                                three_days = c(win_rate_3, mean_pl_3))
+print(down_days_results, digits = 2)
 ```
 
 
