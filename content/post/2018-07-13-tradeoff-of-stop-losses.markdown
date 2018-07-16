@@ -1,7 +1,7 @@
 ---
 title: Tradeoff of Stop Losses
 author: Jason Taylor
-date: '2018-07-13'
+date: '2018-07-10'
 slug: tradeoff-of-stop-losses
 summary: Stop losses are a popular strategy used by traders to achieve better performance
   by closing out of a losing trade. But do they work?
