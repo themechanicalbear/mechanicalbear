@@ -2,7 +2,7 @@
 title: Directional Trading and Price Extremes
 author: Jason Taylor
 date: '2018-07-11'
-draft: TRUE
+draft: FALSE
 slug: directional-trading-and-price-extremes
 summary: How do naked short options perform after large price movements and at price extremes?
 categories:
@@ -15,13 +15,17 @@ header:
 
 ### Market Measures - July 11, 2018
 
-How do naked short options perform after large price movements and at price extremes?
+How do naked short options perform after large price movements or price extremes?
 
-*Let’s compare selling naked options into multiple days of trading in one direction to a large weekly move.*  
-*The tastytrade Research Department used 45 DTE options to see if the following setup worked from 2005 to now.*  
-*If the market went lower, we sold a 30 delta put, and if it went higher, we sold a 30 delta call.*  
-*We find that that selling puts into weakness (either measured by days or % moves) did yield a substantial profit.*  
-*Selling calls into strength yielded decent profits when waiting for large percentage moves up over number of up days.*  
+The tastytrade Research Department used 45 DTE options in SPY to see if the following setup worked from 2005 to now.
+I will use 14 symbols that I have the most data for from Jan 2012 - March 2018.
+If the market went lower, sell a 30 delta put, and if it went higher, sell a 30 delta call. 
+
+#### Tastytrade results:  
+We find that that selling puts into weakness (either measured by days or % moves) did yield a substantial profit. Selling calls into strength yielded decent profits when waiting for large percentage moves up over number of up days.  
+
+#### My Results:
+I found that there was variation in results between symbols and less success in selling calls than puts. One possible reason for the difference in results in SPY alone is the date range as the period 2012-18 is decidedly bullish and calls did not perform well here. Several symbols lost money in all slices. See results tables at the end of this post. More analysis can be done here, and I may come back to this one.
 
 Here I will recreate this study and extend it to include more underlyings again with emphasis on learning new coding practices. As always recreating the Market Measure study will be done utilizing the tastytrade package on  [github](https://github.com/themechanicalbear/tastytrade).
 
@@ -33,10 +37,8 @@ suppressWarnings(suppressMessages(suppressPackageStartupMessages({
   library_list <- c("tastytrade", "dplyr", "ggplot2", "here", "purrr", "tidyr",
                     "data.table")
   lapply(library_list, require, character.only = TRUE)})))
-
 stock_list <- c("SPY", "IWM", "GLD", "QQQ", "DIA", "TLT", "XLE", "EEM",
                 "MA", "FB", "FXI", "SLV", "EWZ", "FXE", "TBT", "IBM")
-#stock_list <- c("SPY", "IWM")
 tar_dte <- 45
 tar_delta_put <- -.30
 tar_delta_call <- .30
@@ -79,7 +81,8 @@ study <- function(stock) {
     dplyr::mutate(rank = rank(quotedate)) %>%
     dplyr::filter(rank == min(rank) | rank == max(rank)) %>%
     dplyr::mutate(delta = close - lag(close, 1)) %>%
-    dplyr::mutate(delta = ifelse(is.na(delta), max(delta, na.rm = TRUE), delta)) %>%
+    dplyr::mutate(delta = ifelse(is.na(delta), max(delta, na.rm = TRUE),
+                                 delta)) %>%
     dplyr::filter(rank == 1) %>%
     dplyr::ungroup() %>%
     dplyr::mutate(return = (delta / close) * 100) %>% 
@@ -117,6 +120,7 @@ study <- function(stock) {
   down_3d <- dplyr::filter(closed_puts, open_date %in% down_three$quotedate)
   down_2d <- dplyr::filter(closed_puts, open_date %in% down_two$quotedate)
   down_1d <- dplyr::filter(closed_puts, open_date %in% down_one$quotedate)
+  
   down_3p <- dplyr::filter(closed_puts, open_date %in% wk_dwn_three$quotedate)
   down_2p <- dplyr::filter(closed_puts, open_date %in% wk_dwn_two$quotedate)
   down_1p <- dplyr::filter(closed_puts, open_date %in% wk_dwn_one$quotedate)
@@ -172,16 +176,44 @@ study <- function(stock) {
 }
 ```
 
-```{r run study}
-profvis::profvis(all_results <- purrr::map_dfr(stock_list, study))
+```{r run study, warning = FALSE}
+all_results <- purrr::map_dfr(stock_list, study)
 ```
 
-```{r plots and tables}
-win_rate <- dplyr::filter(all_results, metric == "Win Rate")
-pl <- dplyr::filter(all_results, metric == "Avg. P/L")
+```{r tab1}
+win_rate_puts <- dplyr::filter(all_results, metric == "Win Rate", 
+                               direction == "down") %>%
+  dplyr::select(-c(direction, metric)) %>%
+  dplyr::arrange(desc(all_days))
+knitr::kable(win_rate_puts, digits = 2, format = "html", 
+             caption = "Win rates for selling puts into down moves")
+```
 
-knitr::kable(win_rate, digits = 2)
-knitr::kable(pl, digits = 2)
+```{r tab2}
+win_rate_calls <- dplyr::filter(all_results, metric == "Win Rate", 
+                                direction == "up") %>%
+  dplyr::select(-c(direction, metric)) %>%
+  dplyr::arrange(desc(all_days))
+knitr::kable(win_rate_calls, digits = 2, format = "html", 
+             caption = "Win rates for selling calls into up moves")
+```
+
+```{r tab3}
+mean_pl_puts <- dplyr::filter(all_results, metric == "Avg. P/L", 
+                               direction == "down") %>%
+  dplyr::select(-c(direction, metric)) %>%
+  dplyr::arrange(desc(all_days))
+knitr::kable(mean_pl_puts, digits = 2, format = "html", 
+             caption = "Mean P/L for selling puts into down moves")
+```
+
+```{r tab4}
+mean_pl_calls <- dplyr::filter(all_results, metric == "Avg. P/L", 
+                                direction == "up") %>%
+  dplyr::select(-c(direction, metric)) %>%
+  dplyr::arrange(desc(all_days))
+knitr::kable(mean_pl_calls, digits = 2, format = "html", 
+             caption = "Mean P/L for selling calls into up moves")
 ```
 
 
