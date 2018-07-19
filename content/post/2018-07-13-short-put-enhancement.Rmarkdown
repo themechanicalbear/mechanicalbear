@@ -1,0 +1,94 @@
+---
+title: Short Put Enhancement
+author: Jason Taylor
+date: '2018-07-13'
+slug: short-put-enhancement
+summary: The effect of adding a short call to an ATM short put. How did this perform?
+draft: TRUE
+categories:
+  - Tastytrade
+tags:
+  - Short Put
+header:
+  caption: ''
+  image: ''
+---
+
+### Market Measures - July 13, 2018
+
+#### Tastytrade Compared:
+
+Allocating 30% short ATM puts, managed at 50%  
+Allocating 30% of short 50P/16C strangles, managed at 50%  
+
+#### Tastytrade results:
+
+We find that adding a short call to our portfolio of short puts did not add to or hinder performance, but adding the call did reduce our portfolio volatility by 0.4% per month.  
+
+#### Setup global options, load libraries:
+
+```{r global_options, include = TRUE, results = FALSE}
+knitr::opts_chunk$set(message = FALSE, tidy.opts = list(width.cutoff = 60)) 
+suppressWarnings(suppressMessages(suppressPackageStartupMessages({
+  library_list <- c("tastytrade", "dplyr", "ggplot2", "here", "purrr", "tidyr",
+                    "data.table", "knitr", "kableExtra")
+  lapply(library_list, require, character.only = TRUE)})))
+stock_list <- c("SPY", "IWM", "GLD", "QQQ", "DIA", "TLT", "XLE", "EEM",
+                "FB", "FXI", "SLV", "EWZ", "FXE", "TBT", "IBM")
+tar_dte <- 45
+tar_delta_put <- -.50
+tar_delta_call <- .16
+```
+
+#### Study function
+
+```{r study}
+stock <- "SPY"
+study <- function(stock) {
+  options <- readRDS(paste0(here::here(), "/data/options/", stock, ".RDS")) %>%
+    dplyr::mutate(m_dte = abs(dte - tar_dte)) %>%
+    dplyr::mutate(mid = (bid + ask) / 2)
+  
+  monthly <- readRDS(paste0(here::here(), "/data/monthly.RDS"))
+  
+  options_monthly <- options %>%
+    dplyr::filter(quotedate %in% monthly$date)
+  
+  options_expiration <- dplyr::filter(options, quotedate == expiration) %>%
+    dplyr::distinct(quotedate, close, expiration)
+  
+  each_day <- dplyr::distinct(options, quotedate, close)
+  
+  expirations <- dplyr::filter(options, quotedate == expiration)
+  
+  opened_puts <- tastytrade::open_short_put(options_monthly, tar_delta_put)
+  opened_calls <- tastytrade::open_short_call(options_monthly, tar_delta_call)
+  
+  closed_puts <- purrr::pmap_dfr(list(list(options),
+                                      opened_puts$quotedate,
+                                      opened_puts$expiration,
+                                      opened_puts$strike_put,
+                                      opened_puts$mid_put,
+                                      list("put")), 
+                                 tastytrade::close_short_daily) %>%
+    dplyr::right_join(each_day, by = c("open_date" = "quotedate")) %>%
+    dplyr::filter(complete.cases(.))
+  
+  closed_calls <- purrr::pmap_dfr(list(list(options),
+                                      opened_calls$quotedate,
+                                      opened_calls$expiration,
+                                      opened_calls$strike_call,
+                                      opened_calls$mid_call,
+                                      list("call")), 
+                                 tastytrade::close_short_daily) %>%
+    dplyr::right_join(each_day, by = c("open_date" = "quotedate")) %>%
+    dplyr::filter(complete.cases(.))
+  
+  
+}
+```
+
+```{r}
+study(stock)
+```
+
