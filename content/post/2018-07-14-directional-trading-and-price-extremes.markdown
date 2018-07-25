@@ -98,14 +98,17 @@ study <- function(stock) {
   wk_up_two <-  dplyr::filter(weekly_change, return >= 2)
   wk_up_three <-  dplyr::filter(weekly_change, return >= 3)
   
-  opened_puts <- tastytrade::open_short_put(options, "SPY", tar_delta_put)
-  opened_calls <- tastytrade::open_short_call(options, "SPY", tar_delta_call)
+  opened_puts <- tastytrade::open_short(options, tar_delta_put, "put")
+  opened_calls <- tastytrade::open_short(options, tar_delta_call, "call")
+  
+  # opened_puts <- tastytrade::open_short_put(options, "SPY", tar_delta_put)
+  # opened_calls <- tastytrade::open_short_call(options, "SPY", tar_delta_call)
   
   closed_puts <- purrr::pmap_dfr(list(list(expirations),
                                       opened_puts$quotedate,
                                       opened_puts$expiration,
-                                      opened_puts$strike_put,
-                                      opened_puts$mid_put), 
+                                      opened_puts$strike,
+                                      opened_puts$mid), 
                                  tastytrade::close_short_put_exp) %>%
     dplyr::right_join(each_day, by = c("open_date" = "quotedate")) %>%
     dplyr::filter(complete.cases(.))
@@ -113,8 +116,8 @@ study <- function(stock) {
   closed_calls <- purrr::pmap_dfr(list(list(expirations),
                                        opened_calls$quotedate,
                                        opened_calls$expiration,
-                                       opened_calls$strike_call,
-                                       opened_calls$mid_call), 
+                                       opened_calls$strike,
+                                       opened_calls$mid), 
                                   tastytrade::close_short_call_exp) %>%
     dplyr::right_join(each_day, by = c("open_date" = "quotedate")) %>%
     dplyr::filter(complete.cases(.))

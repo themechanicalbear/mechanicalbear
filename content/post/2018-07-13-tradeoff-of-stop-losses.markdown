@@ -57,14 +57,14 @@ study <- function(stock) {
     dplyr::filter(quotedate %in% monthly$date) %>%
     dplyr::mutate(m_dte = abs(dte - tar_dte))
   
-  short_put_opens <- tastytrade::open_short_put(options_filtered, stock, 
-                                                tar_delta_put)
-  short_call_opens <- tastytrade::open_short_call(options_filtered, stock,
-                                                  tar_delta_call)
+  opened_puts <- tastytrade::open_short(options_filtered, tar_delta_put, "put")
+  opened_calls <- tastytrade::open_short(options_filtered, tar_delta_call, "call")
   
-  all_trades <- dplyr::full_join(short_call_opens, short_put_opens, 
+  all_trades <- dplyr::full_join(opened_calls, opened_puts, 
                                  by = c("quotedate", "expiration", "dte")) %>%
-    dplyr::mutate(credit = mid_put + mid_call)
+    dplyr::mutate(credit = mid.x + mid.y) %>%
+    dplyr::rename(strike_call = strike.x,
+                  strike_put = strike.y)
   
   all_closes <- data.frame()
   
