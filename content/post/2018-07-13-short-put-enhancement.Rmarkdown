@@ -4,7 +4,7 @@ author: Jason Taylor
 date: '2018-07-13'
 slug: short-put-enhancement
 summary: The effect of adding a short call to an ATM short put. How did this perform?
-draft: TRUE
+draft: FALSE
 categories:
   - Tastytrade
 tags:
