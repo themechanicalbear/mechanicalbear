@@ -3,7 +3,7 @@ title: ROC Comparisons
 author: Jason Taylor
 date: '2018-07-19'
 slug: roc-comparisons
-draft: TRUE
+draft: FALSE
 categories:
   - Tastytrade
 tags:
@@ -45,20 +45,26 @@ stock_list <- c("SPY", "IWM", "GLD", "QQQ", "DIA", "TLT", "XLE", "EEM",
                 "FXI", "SLV", "EWZ", "FXE", "TBT", "IBM", "FB")
 ```
 
+#### Load options data
+
+
+```r
+load_options <- function(stock, tar_dte) {
+  readRDS(paste0(here::here(), "/data/options/", stock, ".RDS")) %>%
+    dplyr::mutate(m_dte = abs(dte - tar_dte),
+                  mid = (bid + ask) / 2) %>%
+    dplyr::select(symbol, quotedate, close, type, expiration, strike, delta, dte, m_dte, mid)
+}
+```
+
 #### Strangle study function
 
 
 ```r
 strangle_study <- function(stock, tar_dte, tar_delta_put, tar_delta_call) {
-  options <- readRDS(paste0(here::here(), "/data/options/", stock, ".RDS")) %>%
-    dplyr::mutate(m_dte = abs(dte - tar_dte)) %>%
-    dplyr::mutate(mid = (bid + ask) / 2)
-  
+  options <- load_options(stock, tar_dte)
   monthly <- readRDS(paste0(here::here(), "/data/monthly.RDS"))
-  
-  options_monthly <- options %>%
-    dplyr::filter(quotedate %in% monthly$date)
-  
+  options_monthly <- dplyr::filter(options, quotedate %in% monthly$date)
   each_day <- dplyr::distinct(options, quotedate, close)
   
   opened_puts <- tastytrade::open_short(options_monthly, tar_delta_put, "put")
@@ -84,24 +90,23 @@ strangle_study <- function(stock, tar_dte, tar_delta_put, tar_delta_call) {
   dplyr::left_join(closed_puts, closed_calls, 
                    by = c("symbol", "quotedate", 
                           "expiration", "open_date")) %>%
-    dplyr::mutate(strang_open_credit = put_open_credit + call_open_credit,
-                  strang_close_debit = put_close_debit + call_close_debit,
-                  strang_profit = put_profit + call_profit) %>%
+    dplyr::mutate(st_open_credit = put_open_credit + call_open_credit,
+                  st_close_debit = put_close_debit + call_close_debit,
+                  st_profit = put_profit + call_profit) %>%
     dplyr::right_join(each_day, by = c("open_date" = "quotedate")) %>%
     dplyr::filter(complete.cases(.)) %>%
     dplyr::rename(open_stock_price = close) %>%
     dplyr::mutate(open_margin = open_stock_price * 20,
-                  #contracts = 300000 / open_margin,
                   contracts = 1,
-                  tot_profit = strang_profit * contracts * 100) %>%
+                  tot_profit = st_profit * contracts * 100) %>%
     dplyr::filter(quotedate == expiration | 
-                    (strang_close_debit <= (strang_open_credit / 2))) %>%
+                    (st_close_debit <= (st_open_credit / 2))) %>%
     dplyr::group_by(open_date, expiration) %>%
     dplyr::filter(quotedate == min(quotedate)) %>%
     dplyr::ungroup() %>%
     dplyr::arrange(open_date) %>%
-    dplyr::mutate(cum_profit = cumsum(tot_profit)) %>%
-    dplyr::mutate(days_held = quotedate - open_date)
+    dplyr::mutate(cum_profit = cumsum(tot_profit),
+                  days_held = quotedate - open_date)
 }
 ```
 
@@ -110,14 +115,9 @@ strangle_study <- function(stock, tar_dte, tar_delta_put, tar_delta_call) {
 
 ```r
 iron_condor_study <- function(stock, tar_dte, tar_delta_put, tar_delta_call) {
-  options <- readRDS(paste0(here::here(), "/data/options/", stock, ".RDS")) %>%
-    dplyr::mutate(m_dte = abs(dte - tar_dte)) %>%
-    dplyr::mutate(mid = (bid + ask) / 2)
-  
+  options <- load_options(stock, tar_dte)
   monthly <- readRDS(paste0(here::here(), "/data/monthly.RDS"))
-  
-  options_monthly <- options %>%
-    dplyr::filter(quotedate %in% monthly$date)
+  options_monthly <- dplyr::filter(options, quotedate %in% monthly$date)
   
   short_puts <- tastytrade::open_short(options_monthly, tar_delta_put, "put")
   short_calls <- tastytrade::open_short(options_monthly, tar_delta_call, "call")
@@ -128,11 +128,10 @@ iron_condor_study <- function(stock, tar_dte, tar_delta_put, tar_delta_call) {
                     expiration == exp,
                     type == typ,
                     strike < s_strike) %>%
-      dplyr::mutate(diff_strike = s_strike - strike,
-                    max_strike_diff = max(diff_strike)) %>%
-      
-      dplyr::filter(diff_strike >= 20 | diff_strike == max_strike_diff) %>%
-      dplyr::filter(diff_strike == min(diff_strike)) %>%
+      dplyr::mutate(strike_gap = s_strike - strike,
+                    max_strike_gap = max(strike_gap)) %>%
+      dplyr::filter(strike_gap >= 20 | strike_gap == max_strike_gap) %>%
+      dplyr::filter(strike_gap == min(strike_gap)) %>%
       dplyr::select(quotedate, expiration, strike, delta, dte, mid)
   }
   
@@ -142,11 +141,10 @@ iron_condor_study <- function(stock, tar_dte, tar_delta_put, tar_delta_call) {
                     expiration == exp,
                     type == typ,
                     strike > s_strike) %>%
-      dplyr::mutate(diff_strike = strike - s_strike,
-                    max_strike_diff = max(diff_strike)) %>%
-      
-      dplyr::filter(diff_strike >= 20 | diff_strike == max_strike_diff) %>%
-      dplyr::filter(diff_strike == min(diff_strike)) %>%
+      dplyr::mutate(strike_gap = strike - s_strike,
+                    max_strike_gap = max(strike_gap)) %>%
+      dplyr::filter(strike_gap >= 20 | strike_gap == max_strike_gap) %>%
+      dplyr::filter(strike_gap == min(strike_gap)) %>%
       dplyr::select(quotedate, expiration, strike, delta, dte, mid)
   }
   
@@ -184,11 +182,9 @@ iron_condor_study <- function(stock, tar_dte, tar_delta_put, tar_delta_call) {
                                    by = c("quotedate", "expiration", "dte")) %>%
     dplyr::mutate(credit = sp_credit + sc_credit + lp_debit + lc_debit)
   
-  
-  # Close iron condors at expiration or 50% profit
   close_ic <- function(qdt, exp, sps, lps, scs, lcs, crdt) {
     options %>%
-      dplyr::select(symbol,quotedate, type, expiration, strike, mid) %>%
+      dplyr::select(symbol, quotedate, type, expiration, strike, mid) %>%
       dplyr::filter(quotedate > qdt,
                     expiration == exp) %>%
       dplyr::filter((type == "put" & strike == sps) |
@@ -201,32 +197,29 @@ iron_condor_study <- function(stock, tar_dte, tar_delta_put, tar_delta_call) {
       dplyr::group_by(quotedate, expiration) %>%
       dplyr::mutate(debit = sum(mid)) %>%
       dplyr::ungroup() %>%
-      #dplyr::filter(quotedate == expiration | debit <= (crdt / 2)) %>%
       dplyr::filter(quotedate == max(quotedate) | debit <= (crdt / 2)) %>%
       dplyr::filter(quotedate == min(quotedate)) %>%
       dplyr::distinct(symbol, quotedate, open_date, expiration, debit) %>%
       dplyr::rename(close_date = quotedate)
   }
   
-  ic_closes <- purrr::pmap_dfr(list(iron_condors$quotedate,
-                                    iron_condors$expiration,
-                                    iron_condors$sp_strike,
-                                    iron_condors$lp_strike,
-                                    iron_condors$sc_strike,
-                                    iron_condors$lc_strike,
-                                    iron_condors$credit),
-                               close_ic)
+  ic_closes <- 
+    purrr::pmap_dfr(list(iron_condors$quotedate, iron_condors$expiration,
+                         iron_condors$sp_strike, iron_condors$lp_strike,
+                         iron_condors$sc_strike, iron_condors$lc_strike,
+                         iron_condors$credit), close_ic)
   
-  dplyr::left_join(iron_condors, ic_closes, by = c("quotedate" = "open_date",
-                                                   "expiration")) %>%
+  dplyr::left_join(iron_condors, ic_closes, 
+                   by = c("quotedate" = "open_date", "expiration")) %>%
     dplyr::mutate(profit = (credit - debit) * 100) %>%
     dplyr::arrange(quotedate) %>%
-    dplyr::mutate(cum_profit = cumsum(profit)) %>%
-    dplyr::mutate(put_wide = sp_strike - lp_strike,
-                  call_wide = lc_strike - sc_strike) %>%
-    dplyr::mutate(wide = ifelse(put_wide > call_wide, put_wide, call_wide)) %>%
-    dplyr::mutate(margin = (wide - credit) * 100) %>%
-    dplyr::mutate(days_held = close_date - quotedate) %>%
+    dplyr::mutate(cum_profit = cumsum(profit),
+                  put_wide = sp_strike - lp_strike,
+                  call_wide = lc_strike - sc_strike,
+                  wide = ifelse(put_wide > call_wide, 
+                                put_wide, call_wide),
+                  margin = (wide - credit) * 100,
+                  days_held = close_date - quotedate) %>%
     dplyr::filter(complete.cases(.))
 }
 ```
@@ -235,12 +228,12 @@ iron_condor_study <- function(stock, tar_dte, tar_delta_put, tar_delta_call) {
 
 
 ```r
-ic_results <- purrr::pmap_dfr(list(stock_list, tar_dte = 45, 
-                                   tar_delta_put = -0.25, tar_delta_call = 0.25),
-                              iron_condor_study)
-st_results <- purrr::pmap_dfr(list(stock_list, tar_dte = 45,
-                                   tar_delta_put = -0.16, tar_delta_call = 0.16),
-                              strangle_study)
+ic_results <- 
+  purrr::pmap_dfr(list(stock_list, tar_dte = 45, tar_delta_put = -0.25,
+                       tar_delta_call = 0.25), iron_condor_study)
+st_results <- 
+  purrr::pmap_dfr(list(stock_list, tar_dte = 45, tar_delta_put = -0.16,
+                       tar_delta_call = 0.16), strangle_study)
 ```
 
 #### Metrics  
@@ -279,8 +272,8 @@ results <- dplyr::left_join(metrics_st, metrics_ic, by = "symbol") %>%
 
 
 ```r
- MM71918 <- results %>% 
-   DT::datatable(., width = 1200)
+MM71918 <- results %>% 
+  DT::datatable(., width = 1200)
 
 f <- "../../static/post/roc-comparisons/MM71918.html"
 htmlwidgets::saveWidget(MM71918, file.path(normalizePath(dirname(f)),
