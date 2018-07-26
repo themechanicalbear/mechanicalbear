@@ -93,17 +93,18 @@ strangle_study <- function(stock, tar_dte, tar_delta_put, tar_delta_call) {
     dplyr::right_join(each_day, by = c("open_date" = "quotedate")) %>%
     dplyr::filter(complete.cases(.)) %>%
     dplyr::rename(open_stock_price = close) %>%
-    dplyr::mutate(open_margin = open_stock_price * 20,
+    dplyr::mutate(margin = open_stock_price * 20,
                   contracts = 1,
-                  tot_profit = st_profit * contracts * 100) %>%
+                  profit = st_profit * contracts * 100) %>%
     dplyr::filter(quotedate == expiration | 
                     (st_close_debit <= (st_open_credit / 2))) %>%
     dplyr::group_by(open_date, expiration) %>%
     dplyr::filter(quotedate == min(quotedate)) %>%
     dplyr::ungroup() %>%
     dplyr::arrange(open_date) %>%
-    dplyr::mutate(cum_profit = cumsum(tot_profit),
-                  days_held = quotedate - open_date)
+    dplyr::mutate(cum_profit = cumsum(profit),
+                  days_held = quotedate - open_date,
+                  study = "strangle")
 }
 ```
 
@@ -216,7 +217,8 @@ iron_condor_study <- function(stock, tar_dte, tar_delta_put, tar_delta_call) {
                                 put_wide, call_wide),
                   margin = (wide - credit) * 100,
                   days_held = close_date - quotedate) %>%
-    dplyr::filter(complete.cases(.))
+    dplyr::filter(complete.cases(.)) %>%
+    dplyr::mutate(study = "iron condor")
 }
 ```
 
@@ -226,47 +228,37 @@ iron_condor_study <- function(stock, tar_dte, tar_delta_put, tar_delta_call) {
 ic_results <- 
   purrr::pmap_dfr(list(stock_list, tar_dte = 45, tar_delta_put = -0.25,
                        tar_delta_call = 0.25), iron_condor_study)
+ic <- dplyr::select(ic_results, c(symbol, study, profit, margin, days_held)) %>%
+  dplyr::mutate(days_held = as.numeric(days_held))
 st_results <- 
   purrr::pmap_dfr(list(stock_list, tar_dte = 45, tar_delta_put = -0.16,
                        tar_delta_call = 0.16), strangle_study)
+st <- dplyr::select(st_results, c(symbol, study, profit, margin, days_held)) %>%
+  dplyr::mutate(days_held = as.numeric(days_held))
 ```
 
 #### Metrics  
 
 ```{r metrics}
-metrics_st <- st_results %>%
-  dplyr::group_by(symbol) %>%
-  dplyr::mutate(roc = tot_profit / open_margin,
-                st_roc = scales::percent(mean(roc)),
-                st_margin = scales::dollar(mean(open_margin)),
-                st_profit = round(sum(tot_profit), digits = 2),
-                total_days_held = sum(as.numeric(days_held)),
-                st_daily = scales::dollar(st_profit / total_days_held)) %>%
-  dplyr::ungroup() %>%
-  dplyr::distinct(symbol, st_roc, st_daily, st_margin, st_profit) 
-
-metrics_ic <- ic_results %>%
-  dplyr::group_by(symbol) %>%
+metrics <- dplyr::bind_rows(st, ic) %>%
+  dplyr::group_by(symbol, study) %>%
   dplyr::mutate(roc = profit / margin,
-                ic_roc = scales::percent(mean(roc)),
-                ic_margin = scales::dollar(mean(margin)),
-                ic_profit = round(sum(profit), digits = 2), 
-                total_days_held = sum(as.numeric(days_held)),
-                ic_daily = scales::dollar(ic_profit / total_days_held)) %>%
+                roc = scales::percent(mean(roc)),
+                margin = scales::dollar(mean(margin)),
+                profit = round(sum(profit), digits = 2),
+                total_days_held = sum(days_held),
+                daily_pnl = scales::dollar(profit / total_days_held),
+                profit = scales::dollar(profit)) %>%
   dplyr::ungroup() %>%
-  dplyr::distinct(symbol, ic_roc, ic_daily, ic_margin, ic_profit)
-
-results <- dplyr::left_join(metrics_st, metrics_ic, by = "symbol") %>%
-  dplyr::select(symbol, st_roc, ic_roc, st_daily, ic_daily,
-                st_margin, ic_margin, st_profit, ic_profit) %>%
-  dplyr::arrange(symbol)
+  dplyr::distinct(symbol, study, roc, daily_pnl, margin, profit) %>%
+  dplyr::arrange(symbol, study)
 ```
 
 #### Results 
 
 ```{r, message = FALSE, warning = FALSE, include = TRUE}
-MM71918 <- results %>% 
-  DT::datatable(., width = 1200)
+MM71918 <- metrics %>% 
+  DT::datatable(., width = 650)
 
 f <- "../../static/post/roc-comparisons/MM71918.html"
 htmlwidgets::saveWidget(MM71918, file.path(normalizePath(dirname(f)),
