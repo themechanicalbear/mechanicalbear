@@ -33,56 +33,61 @@ We find that the stock moves (on average) a lot less over a 22 day period than a
 ```r
 knitr::opts_chunk$set(message = FALSE, tidy.opts = list(width.cutoff = 60)) 
 suppressWarnings(suppressMessages(suppressPackageStartupMessages({
-  library_list <- c("tastytrade", "dplyr", "ggplot2", "here", "purrr", "tidyr",
+  library_list <- c("tastytrade", "tidyverse", "here", "RJDBC",
                     "data.table", "knitr", "kableExtra")
   lapply(library_list, require, character.only = TRUE)})))
-stock_list <- c("SPY", "IWM", "GLD", "QQQ", "DIA", "TLT", "XLE", "EEM",
-                "FB", "FXI", "SLV", "EWZ", "FXE", "TBT", "IBM")
-tar_dte <- 45
-early_exit <- 22
+stock_list <- c("SPY", "IWM", "GLD", "QQQ", "DIA",
+                "TLT", "XLE", "EEM", "EWZ", "FXE")
+args <- expand.grid(symbol = c("SPY", "IWM", "GLD", "QQQ", "DIA",
+                               "TLT", "XLE", "EEM", "EWZ", "FXE"),
+                    tar_dte = 45,
+                    tar_mid_dte = 21,
+                    stringsAsFactors = FALSE) %>%
+  dplyr::arrange(symbol)
+monthly <- readRDS(paste0(here::here(), "/data/monthly.RDS"))
 ```
 
 #### Study function
 
 
 ```r
-study <- function(stock) {
-  options <- readRDS(paste0(here::here(), "/data/options/", stock, ".RDS")) %>%
-    dplyr::mutate(m_dte = abs(dte - tar_dte),
-                  mid_dte = abs(dte - early_exit))
+study <- function(stock, tar_dte, early_exit) {
+  rs_conn <- tastytrade::redshift_connect("TASTYTRADE")
+  options <- rs_conn %>%
+    dplyr::tbl(stock) %>%
+    dplyr::mutate(m_dte = abs(dte - tar_dte))
   
   expirations <- dplyr::filter(options, quotedate == expiration) %>%
-    dplyr::distinct(quotedate, close, expiration)
+    dplyr::distinct(quotedate, close_price, expiration) %>%
+    dplyr::collect()
   
   dte_45 <- options %>%
+    dplyr::filter(quotedate %in% monthly$date) %>%
     dplyr::group_by(quotedate) %>%
-    dplyr::filter(m_dte == min(m_dte)) %>%
-    dplyr::filter(dplyr::row_number() == 1) %>%
+    dplyr::filter(m_dte == min(m_dte, na.rm = TRUE)) %>%
     dplyr::ungroup() %>%
-    dplyr::select(quotedate, close, expiration, dte)
+    dplyr::distinct(quotedate, close_price, expiration, dte) %>%
+    dplyr::collect()
   
-  mid_exit <- function(exp) {
-    options %>%
-      dplyr::filter(expiration == exp) %>%
-      dplyr::filter(mid_dte == min(mid_dte)) %>%
-      dplyr::filter(dplyr::row_number() == 1) %>%
-      dplyr::select(quotedate, close, expiration, dte)
-  }
+  dte_22 <- purrr::pmap_dfr(list(list(options),
+                                 early_exit, dte_45$expiration),
+                            tastytrade::dte_exit)
   
-  dte_22 <- purrr::map_dfr(dte_45$expiration, mid_exit)
+  RJDBC::dbDisconnect(rs_conn)
   
-  results <- dplyr::left_join(dte_45, dte_22, by = "expiration") %>%
+  dplyr::left_join(dte_45, dte_22, by = "expiration") %>%
     dplyr::left_join(expirations, by = "expiration") %>%
     dplyr::distinct() %>%
-    magrittr::set_colnames(c("open_date", "open_price", "expiration", "open_dte", 
-                             "mid_date", "mid_price", "mid_dte", "close_date",
-                             "close_price")) %>%
+    magrittr::set_colnames(., c("open_date", "open_price", "expiration",
+                                "open_dte", "mid_date", "mid_price",
+                                "mid_dte", "close_date", "close_price")) %>%
     dplyr::mutate(symbol = stock,
                   mid_diff = mid_price - open_price,
                   close_diff = close_price - open_price,
                   mid_return = (mid_price - open_price) / open_price,
                   close_return = (close_price - open_price) / open_price) %>%
-    dplyr::mutate(early_better = ifelse(abs(close_diff) >= abs(mid_diff), 1, 0)) %>%
+    dplyr::mutate(early_better = ifelse(abs(close_diff) >= abs(mid_diff),
+                                        1, 0)) %>%
     dplyr::filter(complete.cases(.))
 }
 ```
@@ -91,40 +96,40 @@ study <- function(stock) {
 
 
 ```r
-results <- purrr::map_dfr(stock_list, study)
+results <- 
+  purrr::pmap_dfr(list(args$symbol, args$tar_dte, args$tar_mid_dte), study)
 ```
 
 #### Plot absolute value of price changes showing less volatility when closed early
 
 
 ```r
-group_one_returns <- results %>%
-  dplyr::filter(symbol %in% c("EWZ", "TLT", "SLV", "FXI", "XLE", "EEM", "FXE"))
-group_two_returns <- results %>%
-  dplyr::filter(symbol %in% c("GLD", "QQQ", "DIA", "IWM", "IBM", "SPY"))
+gp1 <- dplyr::filter(results, symbol %in% c("SPY", "IWM", "GLD", "QQQ", "DIA"))
+gp2 <- dplyr::filter(results, symbol %in% c("TLT", "XLE", "EEM", "EWZ", "FXE"))
 
 grouped_plot <- function(df) {
-  ggplot(data = df, aes(x = open_date, y = abs(mid_diff), color = "mid price")) +
+  ggplot(data = df, aes(x = as.Date(open_date, format = "%Y-%m-%d"), 
+                        y = abs(mid_diff), color = "mid price")) +
     geom_line() +
-    geom_line(data = df, aes(x = open_date, y = abs(close_diff), 
-                             color = "close price")) +
+    geom_line(data = df, aes(x = as.Date(open_date, format = "%Y-%m-%d"),
+                             y = abs(close_diff), color = "close price")) +
     scale_fill_brewer() +
-    theme_dark() + 
-    labs(title = "ABS stock value change compared to open price", x = "Date",
+    theme_minimal() +
+    labs(title = "(abs) stock value change compared to open price", x = "Date",
          y = "Stock change") +
     facet_grid(rows = vars(symbol), scales = "free_y")
 }
 
-grouped_plot(group_one_returns)
+grouped_plot(gp1)
 ```
 
-<img src="/post/2018-07-12-managing-earlier-stock-movement_files/figure-html/unnamed-chunk-2-1.png" width="672" />
+<img src="/post/2018-07-12-managing-earlier-stock-movement_files/figure-html/plots-1.png" width="672" />
 
 ```r
-grouped_plot(group_two_returns)
+grouped_plot(gp2)
 ```
 
-<img src="/post/2018-07-12-managing-earlier-stock-movement_files/figure-html/unnamed-chunk-2-2.png" width="672" />
+<img src="/post/2018-07-12-managing-earlier-stock-movement_files/figure-html/plots-2.png" width="672" />
 
 #### Percentage of days when closing earlier reduced abs price change
 
@@ -139,82 +144,14 @@ early_better_pct <- results %>%
   dplyr::select(symbol, freq) %>%
   dplyr::arrange(desc(freq))
 
-knitr::kable(early_better_pct, digits = 3, 
-             caption = "Percent when price change is less after 22 days than 45") %>%
-  kableExtra::kable_styling(bootstrap_options = "striped", full_width = F)
+ggplot(early_better_pct, aes(x = symbol, y = freq)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(title = "Percent when price change is less after 22 days than 45",
+       x = "Symbol", y = "Percentage")
 ```
 
-<table class="table table-striped" style="width: auto !important; margin-left: auto; margin-right: auto;">
-<caption>Table 1 Percent when price change is less after 22 days than 45</caption>
- <thead>
-  <tr>
-   <th style="text-align:left;"> symbol </th>
-   <th style="text-align:right;"> freq </th>
-  </tr>
- </thead>
-<tbody>
-  <tr>
-   <td style="text-align:left;"> QQQ </td>
-   <td style="text-align:right;"> 0.719 </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;"> DIA </td>
-   <td style="text-align:right;"> 0.705 </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;"> TBT </td>
-   <td style="text-align:right;"> 0.690 </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;"> EEM </td>
-   <td style="text-align:right;"> 0.687 </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;"> TLT </td>
-   <td style="text-align:right;"> 0.686 </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;"> SPY </td>
-   <td style="text-align:right;"> 0.684 </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;"> FXE </td>
-   <td style="text-align:right;"> 0.669 </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;"> IWM </td>
-   <td style="text-align:right;"> 0.669 </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;"> FB </td>
-   <td style="text-align:right;"> 0.658 </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;"> EWZ </td>
-   <td style="text-align:right;"> 0.652 </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;"> FXI </td>
-   <td style="text-align:right;"> 0.651 </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;"> IBM </td>
-   <td style="text-align:right;"> 0.650 </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;"> XLE </td>
-   <td style="text-align:right;"> 0.644 </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;"> GLD </td>
-   <td style="text-align:right;"> 0.603 </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;"> SLV </td>
-   <td style="text-align:right;"> 0.565 </td>
-  </tr>
-</tbody>
-</table>
+<img src="/post/2018-07-12-managing-earlier-stock-movement_files/figure-html/unnamed-chunk-1-1.png" width="672" />
 
 #### Table with closing metrics
 
@@ -231,195 +168,155 @@ return_metrics <- results %>%
                 sd_mid = scales::percent(sd(mid_return)),
                 sd_close = scales::percent(sd(close_return))) %>%
   dplyr::ungroup() %>%
-  dplyr::distinct(symbol, avg_mid, avg_close, max_mid, max_close, min_mid,
-                  min_close, sd_mid, sd_close) %>%
+  dplyr::distinct(symbol, avg_mid, avg_close, max_mid, max_close,
+                  min_mid, min_close, sd_mid, sd_close) %>%
   dplyr::arrange(symbol)
 
-knitr::kable(return_metrics, digits = 3, 
-             caption = "Percentage Returns and Standard Deviation") %>%
-  kableExtra::kable_styling(bootstrap_options = "striped", full_width = F)
+knitr::kable(return_metrics, digits = 2, format = "html",
+             caption = "Percentage Returns and Standard Deviation",
+             col.names = c("SYM", "MID", "CLOSE", "MID", "CLOSE",
+                           "MID", "CLOSE", "MID", "CLOSE"),
+             escape = FALSE, 
+             align = c('l', 'r', 'r', 'r', 'r', 'r', 'r', 'r', 'r')) %>%
+  kableExtra::kable_styling(bootstrap_options = "striped", 
+                            full_width = FALSE) %>%
+  kableExtra::add_header_above(., c(" ", "  AVG" = 2, "  MAX" = 2,
+                                    "  MIN" = 2, "  SD" = 2)) %>%
+  kableExtra::column_spec(., 1:9, width = "1.0in")
 ```
 
 <table class="table table-striped" style="width: auto !important; margin-left: auto; margin-right: auto;">
-<caption>Table 2 Percentage Returns and Standard Deviation</caption>
+<caption>Table 1 Percentage Returns and Standard Deviation</caption>
  <thead>
+<tr>
+<th style="border-bottom:hidden" colspan="1"></th>
+<th style="border-bottom:hidden; padding-bottom:0; padding-left:3px;padding-right:3px;text-align: center; " colspan="2"><div style="border-bottom: 1px solid #ddd; padding-bottom: 5px;">  AVG</div></th>
+<th style="border-bottom:hidden; padding-bottom:0; padding-left:3px;padding-right:3px;text-align: center; " colspan="2"><div style="border-bottom: 1px solid #ddd; padding-bottom: 5px;">  MAX</div></th>
+<th style="border-bottom:hidden; padding-bottom:0; padding-left:3px;padding-right:3px;text-align: center; " colspan="2"><div style="border-bottom: 1px solid #ddd; padding-bottom: 5px;">  MIN</div></th>
+<th style="border-bottom:hidden; padding-bottom:0; padding-left:3px;padding-right:3px;text-align: center; " colspan="2"><div style="border-bottom: 1px solid #ddd; padding-bottom: 5px;">  SD</div></th>
+</tr>
   <tr>
-   <th style="text-align:left;"> symbol </th>
-   <th style="text-align:left;"> avg_mid </th>
-   <th style="text-align:left;"> avg_close </th>
-   <th style="text-align:left;"> max_mid </th>
-   <th style="text-align:left;"> max_close </th>
-   <th style="text-align:left;"> min_mid </th>
-   <th style="text-align:left;"> min_close </th>
-   <th style="text-align:left;"> sd_mid </th>
-   <th style="text-align:left;"> sd_close </th>
+   <th style="text-align:left;"> SYM </th>
+   <th style="text-align:right;"> MID </th>
+   <th style="text-align:right;"> CLOSE </th>
+   <th style="text-align:right;"> MID </th>
+   <th style="text-align:right;"> CLOSE </th>
+   <th style="text-align:right;"> MID </th>
+   <th style="text-align:right;"> CLOSE </th>
+   <th style="text-align:right;"> MID </th>
+   <th style="text-align:right;"> CLOSE </th>
   </tr>
  </thead>
 <tbody>
   <tr>
-   <td style="text-align:left;"> DIA </td>
-   <td style="text-align:left;"> 0.674% </td>
-   <td style="text-align:left;"> 1.39% </td>
-   <td style="text-align:left;"> 9.14% </td>
-   <td style="text-align:left;"> 12.1% </td>
-   <td style="text-align:left;"> -8.9% </td>
-   <td style="text-align:left;"> -10.7% </td>
-   <td style="text-align:left;"> 2.59% </td>
-   <td style="text-align:left;"> 3.7% </td>
+   <td style="text-align:left;width: 1.0in; "> DIA </td>
+   <td style="text-align:right;width: 1.0in; "> 0.935% </td>
+   <td style="text-align:right;width: 1.0in; "> 1.4% </td>
+   <td style="text-align:right;width: 1.0in; "> 8.54% </td>
+   <td style="text-align:right;width: 1.0in; "> 10% </td>
+   <td style="text-align:right;width: 1.0in; "> -6.24% </td>
+   <td style="text-align:right;width: 1.0in; "> -10.7% </td>
+   <td style="text-align:right;width: 1.0in; "> 2.86% </td>
+   <td style="text-align:right;width: 1.0in; "> 4.05% </td>
   </tr>
   <tr>
-   <td style="text-align:left;"> EEM </td>
-   <td style="text-align:left;"> 0.0928% </td>
-   <td style="text-align:left;"> 0.458% </td>
-   <td style="text-align:left;"> 14.3% </td>
-   <td style="text-align:left;"> 16.8% </td>
-   <td style="text-align:left;"> -12.2% </td>
-   <td style="text-align:left;"> -18.6% </td>
-   <td style="text-align:left;"> 4.07% </td>
-   <td style="text-align:left;"> 5.95% </td>
+   <td style="text-align:left;width: 1.0in; "> EEM </td>
+   <td style="text-align:right;width: 1.0in; "> 0.298% </td>
+   <td style="text-align:right;width: 1.0in; "> 0.418% </td>
+   <td style="text-align:right;width: 1.0in; "> 10.1% </td>
+   <td style="text-align:right;width: 1.0in; "> 13.2% </td>
+   <td style="text-align:right;width: 1.0in; "> -12.6% </td>
+   <td style="text-align:right;width: 1.0in; "> -17.3% </td>
+   <td style="text-align:right;width: 1.0in; "> 4.19% </td>
+   <td style="text-align:right;width: 1.0in; "> 6.69% </td>
   </tr>
   <tr>
-   <td style="text-align:left;"> EWZ </td>
-   <td style="text-align:left;"> -0.298% </td>
-   <td style="text-align:left;"> -0.159% </td>
-   <td style="text-align:left;"> 33.3% </td>
-   <td style="text-align:left;"> 47.4% </td>
-   <td style="text-align:left;"> -19.3% </td>
-   <td style="text-align:left;"> -27.3% </td>
-   <td style="text-align:left;"> 7.2% </td>
-   <td style="text-align:left;"> 11.2% </td>
+   <td style="text-align:left;width: 1.0in; "> EWZ </td>
+   <td style="text-align:right;width: 1.0in; "> -0.148% </td>
+   <td style="text-align:right;width: 1.0in; "> 0.0395% </td>
+   <td style="text-align:right;width: 1.0in; "> 19.1% </td>
+   <td style="text-align:right;width: 1.0in; "> 34.8% </td>
+   <td style="text-align:right;width: 1.0in; "> -14.8% </td>
+   <td style="text-align:right;width: 1.0in; "> -22.1% </td>
+   <td style="text-align:right;width: 1.0in; "> 6.91% </td>
+   <td style="text-align:right;width: 1.0in; "> 11.6% </td>
   </tr>
   <tr>
-   <td style="text-align:left;"> FB </td>
-   <td style="text-align:left;"> 2.88% </td>
-   <td style="text-align:left;"> 4.45% </td>
-   <td style="text-align:left;"> 55.7% </td>
-   <td style="text-align:left;"> 79.1% </td>
-   <td style="text-align:left;"> -34.9% </td>
-   <td style="text-align:left;"> -42.4% </td>
-   <td style="text-align:left;"> 9.09% </td>
-   <td style="text-align:left;"> 12.1% </td>
+   <td style="text-align:left;width: 1.0in; "> FXE </td>
+   <td style="text-align:right;width: 1.0in; "> -0.244% </td>
+   <td style="text-align:right;width: 1.0in; "> -0.15% </td>
+   <td style="text-align:right;width: 1.0in; "> 3.5% </td>
+   <td style="text-align:right;width: 1.0in; "> 6.34% </td>
+   <td style="text-align:right;width: 1.0in; "> -6.66% </td>
+   <td style="text-align:right;width: 1.0in; "> -7.28% </td>
+   <td style="text-align:right;width: 1.0in; "> 2.12% </td>
+   <td style="text-align:right;width: 1.0in; "> 2.83% </td>
   </tr>
   <tr>
-   <td style="text-align:left;"> FXE </td>
-   <td style="text-align:left;"> -0.0154% </td>
-   <td style="text-align:left;"> -0.179% </td>
-   <td style="text-align:left;"> 6.46% </td>
-   <td style="text-align:left;"> 7.48% </td>
-   <td style="text-align:left;"> -6.14% </td>
-   <td style="text-align:left;"> -10% </td>
-   <td style="text-align:left;"> 1.89% </td>
-   <td style="text-align:left;"> 2.7% </td>
+   <td style="text-align:left;width: 1.0in; "> GLD </td>
+   <td style="text-align:right;width: 1.0in; "> -0.192% </td>
+   <td style="text-align:right;width: 1.0in; "> -0.453% </td>
+   <td style="text-align:right;width: 1.0in; "> 8.9% </td>
+   <td style="text-align:right;width: 1.0in; "> 14.3% </td>
+   <td style="text-align:right;width: 1.0in; "> -12.7% </td>
+   <td style="text-align:right;width: 1.0in; "> -15.3% </td>
+   <td style="text-align:right;width: 1.0in; "> 4.37% </td>
+   <td style="text-align:right;width: 1.0in; "> 5.63% </td>
   </tr>
   <tr>
-   <td style="text-align:left;"> FXI </td>
-   <td style="text-align:left;"> 0.212% </td>
-   <td style="text-align:left;"> 0.794% </td>
-   <td style="text-align:left;"> 23% </td>
-   <td style="text-align:left;"> 27.3% </td>
-   <td style="text-align:left;"> -16% </td>
-   <td style="text-align:left;"> -21.7% </td>
-   <td style="text-align:left;"> 5.44% </td>
-   <td style="text-align:left;"> 7.45% </td>
+   <td style="text-align:left;width: 1.0in; "> IWM </td>
+   <td style="text-align:right;width: 1.0in; "> 1.13% </td>
+   <td style="text-align:right;width: 1.0in; "> 1.6% </td>
+   <td style="text-align:right;width: 1.0in; "> 14.5% </td>
+   <td style="text-align:right;width: 1.0in; "> 16.1% </td>
+   <td style="text-align:right;width: 1.0in; "> -6.41% </td>
+   <td style="text-align:right;width: 1.0in; "> -16.5% </td>
+   <td style="text-align:right;width: 1.0in; "> 3.95% </td>
+   <td style="text-align:right;width: 1.0in; "> 5.53% </td>
   </tr>
   <tr>
-   <td style="text-align:left;"> GLD </td>
-   <td style="text-align:left;"> -0.169% </td>
-   <td style="text-align:left;"> -0.588% </td>
-   <td style="text-align:left;"> 13.4% </td>
-   <td style="text-align:left;"> 16.7% </td>
-   <td style="text-align:left;"> -15.2% </td>
-   <td style="text-align:left;"> -15.6% </td>
-   <td style="text-align:left;"> 3.82% </td>
-   <td style="text-align:left;"> 5.11% </td>
+   <td style="text-align:left;width: 1.0in; "> QQQ </td>
+   <td style="text-align:right;width: 1.0in; "> 1.4% </td>
+   <td style="text-align:right;width: 1.0in; "> 1.88% </td>
+   <td style="text-align:right;width: 1.0in; "> 10.3% </td>
+   <td style="text-align:right;width: 1.0in; "> 11.5% </td>
+   <td style="text-align:right;width: 1.0in; "> -7.18% </td>
+   <td style="text-align:right;width: 1.0in; "> -12.4% </td>
+   <td style="text-align:right;width: 1.0in; "> 3.38% </td>
+   <td style="text-align:right;width: 1.0in; "> 4.87% </td>
   </tr>
   <tr>
-   <td style="text-align:left;"> IBM </td>
-   <td style="text-align:left;"> -0.11% </td>
-   <td style="text-align:left;"> -0.389% </td>
-   <td style="text-align:left;"> 15.7% </td>
-   <td style="text-align:left;"> 25.5% </td>
-   <td style="text-align:left;"> -14% </td>
-   <td style="text-align:left;"> -15.5% </td>
-   <td style="text-align:left;"> 4.18% </td>
-   <td style="text-align:left;"> 5.89% </td>
+   <td style="text-align:left;width: 1.0in; "> SPY </td>
+   <td style="text-align:right;width: 1.0in; "> 0.98% </td>
+   <td style="text-align:right;width: 1.0in; "> 1.42% </td>
+   <td style="text-align:right;width: 1.0in; "> 7.99% </td>
+   <td style="text-align:right;width: 1.0in; "> 6.99% </td>
+   <td style="text-align:right;width: 1.0in; "> -6.14% </td>
+   <td style="text-align:right;width: 1.0in; "> -10.9% </td>
+   <td style="text-align:right;width: 1.0in; "> 2.72% </td>
+   <td style="text-align:right;width: 1.0in; "> 3.95% </td>
   </tr>
   <tr>
-   <td style="text-align:left;"> IWM </td>
-   <td style="text-align:left;"> 0.758% </td>
-   <td style="text-align:left;"> 1.58% </td>
-   <td style="text-align:left;"> 16.2% </td>
-   <td style="text-align:left;"> 18.2% </td>
-   <td style="text-align:left;"> -12.6% </td>
-   <td style="text-align:left;"> -16.5% </td>
-   <td style="text-align:left;"> 3.51% </td>
-   <td style="text-align:left;"> 4.92% </td>
+   <td style="text-align:left;width: 1.0in; "> TLT </td>
+   <td style="text-align:right;width: 1.0in; "> 0.126% </td>
+   <td style="text-align:right;width: 1.0in; "> 0.154% </td>
+   <td style="text-align:right;width: 1.0in; "> 5.99% </td>
+   <td style="text-align:right;width: 1.0in; "> 10.4% </td>
+   <td style="text-align:right;width: 1.0in; "> -7.78% </td>
+   <td style="text-align:right;width: 1.0in; "> -12.6% </td>
+   <td style="text-align:right;width: 1.0in; "> 2.99% </td>
+   <td style="text-align:right;width: 1.0in; "> 4.67% </td>
   </tr>
   <tr>
-   <td style="text-align:left;"> QQQ </td>
-   <td style="text-align:left;"> 0.977% </td>
-   <td style="text-align:left;"> 2.1% </td>
-   <td style="text-align:left;"> 11.9% </td>
-   <td style="text-align:left;"> 15.5% </td>
-   <td style="text-align:left;"> -9.95% </td>
-   <td style="text-align:left;"> -14.2% </td>
-   <td style="text-align:left;"> 3.13% </td>
-   <td style="text-align:left;"> 4.54% </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;"> SLV </td>
-   <td style="text-align:left;"> -0.467% </td>
-   <td style="text-align:left;"> -1.32% </td>
-   <td style="text-align:left;"> 22.1% </td>
-   <td style="text-align:left;"> 25.9% </td>
-   <td style="text-align:left;"> -18.6% </td>
-   <td style="text-align:left;"> -23.1% </td>
-   <td style="text-align:left;"> 6.36% </td>
-   <td style="text-align:left;"> 8.33% </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;"> SPY </td>
-   <td style="text-align:left;"> 0.709% </td>
-   <td style="text-align:left;"> 1.49% </td>
-   <td style="text-align:left;"> 9.06% </td>
-   <td style="text-align:left;"> 11.8% </td>
-   <td style="text-align:left;"> -8.99% </td>
-   <td style="text-align:left;"> -10.9% </td>
-   <td style="text-align:left;"> 2.48% </td>
-   <td style="text-align:left;"> 3.58% </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;"> TBT </td>
-   <td style="text-align:left;"> 1.14% </td>
-   <td style="text-align:left;"> 5.06% </td>
-   <td style="text-align:left;"> 324% </td>
-   <td style="text-align:left;"> 332% </td>
-   <td style="text-align:left;"> -75.6% </td>
-   <td style="text-align:left;"> -21.7% </td>
-   <td style="text-align:left;"> 25.2% </td>
-   <td style="text-align:left;"> 43.5% </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;"> TLT </td>
-   <td style="text-align:left;"> 0.142% </td>
-   <td style="text-align:left;"> 0.159% </td>
-   <td style="text-align:left;"> 8.84% </td>
-   <td style="text-align:left;"> 12.3% </td>
-   <td style="text-align:left;"> -9.1% </td>
-   <td style="text-align:left;"> -12.7% </td>
-   <td style="text-align:left;"> 2.66% </td>
-   <td style="text-align:left;"> 4.19% </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;"> XLE </td>
-   <td style="text-align:left;"> 0.0443% </td>
-   <td style="text-align:left;"> 0.136% </td>
-   <td style="text-align:left;"> 15.6% </td>
-   <td style="text-align:left;"> 17% </td>
-   <td style="text-align:left;"> -14.8% </td>
-   <td style="text-align:left;"> -21% </td>
-   <td style="text-align:left;"> 4.25% </td>
-   <td style="text-align:left;"> 6.14% </td>
+   <td style="text-align:left;width: 1.0in; "> XLE </td>
+   <td style="text-align:right;width: 1.0in; "> 0.0403% </td>
+   <td style="text-align:right;width: 1.0in; "> 0.0239% </td>
+   <td style="text-align:right;width: 1.0in; "> 11.3% </td>
+   <td style="text-align:right;width: 1.0in; "> 11.4% </td>
+   <td style="text-align:right;width: 1.0in; "> -10.2% </td>
+   <td style="text-align:right;width: 1.0in; "> -20.7% </td>
+   <td style="text-align:right;width: 1.0in; "> 4.51% </td>
+   <td style="text-align:right;width: 1.0in; "> 6.92% </td>
   </tr>
 </tbody>
 </table>
