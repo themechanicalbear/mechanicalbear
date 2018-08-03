@@ -3,6 +3,7 @@ title: Tradeoff of Stop Losses
 author: Jason Taylor
 date: '2018-07-10'
 slug: tradeoff-of-stop-losses
+draft: FALSE
 summary: Stop losses are a popular strategy used by traders to achieve better performance
   by closing out of a losing trade. But do they work?
 categories:
@@ -32,53 +33,49 @@ first attempt at recreating a Market Measure study and will be the basis of the 
 ```r
 knitr::opts_chunk$set(message = FALSE, tidy.opts = list(width.cutoff = 60)) 
 suppressWarnings(suppressMessages(suppressPackageStartupMessages({
-  library_list <- c("tastytrade", "dplyr", "ggplot2", "here", "purrr", "tidyr", "data.table")
+  library_list <- c("tidyverse", "tastytrade", "here", "DT", "htmlwidgets",
+                    "pool", "shiny", "RJDBC")
   lapply(library_list, require, character.only = TRUE)})))
-
-stock_list <- c("SPY", "IWM", "GLD", "QQQ", "DIA", "TLT", "XLE", "EEM",
-                "MA", "FB", "FXI", "SLV", "EWZ", "FXE", "TBT", "IBM")
-tar_dte <- 45
-tar_delta_put <- -.16
-tar_delta_call <- .16
-all_loss_table <- data.frame()
-all_results <- data.frame()
+stock_list <- c("SPY", "IWM", "GLD", "QQQ", "DIA",
+                "TLT", "XLE", "EEM", "EWZ", "FXE")
+monthly <- readRDS(paste0(here::here(), "/data/monthly.RDS"))
+args <- expand.grid(symbol = stock_list,
+                    tar_dte = 45,
+                    tar_delta_put = -0.16,
+                    tar_delta_call = 0.16,
+                    stringsAsFactors = FALSE)
 ```
 
 #### Study function
 
 
 ```r
-study <- function(stock) {
-  options <- readRDS(paste0(here::here(), "/data/options/", stock, ".RDS")) %>%
-    dplyr::mutate(mid = (bid + ask) / 2)
-  monthly <- readRDS(paste0(here::here(), "/data/monthly.RDS"))
-  
-  options_filtered <- options %>%
-    dplyr::filter(quotedate %in% monthly$date) %>%
+study <- function(stock, tar_dte, tar_delta_put, tar_delta_call) {
+  rs_conn <- tastytrade::redshift_connect("TASTYTRADE")
+  options <- rs_conn %>%
+    dplyr::tbl(stock) %>%
     dplyr::mutate(m_dte = abs(dte - tar_dte))
   
-  opened_puts <- tastytrade::open_short(options_filtered, tar_delta_put, "put")
-  opened_calls <- tastytrade::open_short(options_filtered, tar_delta_call, "call")
+  options_monthly <- dplyr::filter(options, quotedate %in% monthly$date)
   
-  all_trades <- dplyr::full_join(opened_calls, opened_puts, 
+  open_puts <- tastytrade::open_short(options_monthly, tar_delta_put, "put")
+  open_calls <- tastytrade::open_short(options_monthly, tar_delta_call, "call")
+  
+  all_trades <- dplyr::full_join(open_calls, open_puts, 
                                  by = c("quotedate", "expiration", "dte")) %>%
-    dplyr::mutate(credit = mid.x + mid.y) %>%
-    dplyr::rename(strike_call = strike.x,
-                  strike_put = strike.y)
+    dplyr::mutate(credit = call_open_credit + put_open_credit) 
   
-  all_closes <- data.frame()
-  
-  possible_closes <- function(date, exp, c_strike, p_strike, credit) {
-    closes <- options %>%
+  possible_closes <- function(df, date, exp, c_strike, p_strike, credit) {
+    df %>%
       dplyr::filter(quotedate > date,
                     quotedate <= exp,
                     expiration == exp) %>%
       dplyr::filter((strike == c_strike & type == "call") |
                       (strike == p_strike & type == "put")) %>%
       dplyr::group_by(quotedate) %>%
-      dplyr::mutate(open_date = as.Date(date, origin = "1970-01-01"),
+      dplyr::mutate(open_date = date,
                     open_credit = credit,
-                    debit = sum(mid),
+                    debit = sum(mid, na.rm = TRUE),
                     profit = open_credit - debit,
                     loss_1_x = ifelse(debit >= 2 * credit, 1, 0),
                     loss_2_x = ifelse(debit >= 3 * credit, 1, 0),
@@ -89,68 +86,61 @@ study <- function(stock) {
       dplyr::select(symbol, quotedate, expiration, open_date, open_credit,
                     debit, profit, loss_1_x, loss_2_x, loss_3_x, loss_4_x,
                     loss_5_x) %>%
-      dplyr::distinct()
-    
-    all_closes <<- rbind(all_closes, closes)
+      dplyr::distinct() %>%
+      dplyr::collect() %>%
+      dplyr::mutate(open_date = as.Date(open_date, origin = "1970-01-01"),
+                    expiration = as.Date(expiration, origin = "1970-01-01"),
+                    quotedate = as.Date(quotedate, origin = "1970-01-01"))
   }
   
-  invisible(purrr::pmap(list(all_trades$quotedate, all_trades$expiration,
-                             all_trades$strike_call, all_trades$strike_put, 
-                             all_trades$credit), possible_closes))
+  exits <- purrr::pmap_dfr(list(list(options), all_trades$quotedate, 
+                                 all_trades$expiration, all_trades$call_strike,
+                                 all_trades$put_strike, all_trades$credit), 
+                            possible_closes)
   
-  invisible(purrr::pmap(list(df = list(all_closes), 
+  invisible(purrr::pmap(list(df = list(exits), 
                              col_name = list("loss_1_x", "loss_2_x", "loss_3_x",
                                              "loss_4_x", "loss_5_x")),
                         tastytrade::stop_loss))
   
-  expiration <- all_closes %>%
+  exits %>%
     dplyr::group_by(open_date) %>%
     dplyr::filter(quotedate == expiration) %>%
     dplyr::ungroup() %>%
     dplyr::arrange(quotedate) %>%
     dplyr::mutate(portfolio = cumsum(profit) * 100,
-                  loss_type = "expiration")
-  
-  symbol_results <- dplyr::bind_rows(loss_1_x, loss_2_x) %>%
+                  loss_type = "expiration") %>%
+    dplyr::bind_rows(loss_1_x) %>%
+    dplyr::bind_rows(loss_2_x) %>%
     dplyr::bind_rows(loss_3_x) %>%
     dplyr::bind_rows(loss_4_x) %>%
-    dplyr::bind_rows(loss_5_x) %>%
-    dplyr::bind_rows(expiration)
-  
-  all_results <- rbind(all_results, symbol_results)
-  assign("all_results", all_results, envir = .GlobalEnv)
-  
-  this_loss_table <- dplyr::bind_rows(loss_1_x, loss_2_x) %>%
-    dplyr::bind_rows(loss_3_x) %>%
-    dplyr::bind_rows(loss_4_x) %>%
-    dplyr::bind_rows(loss_5_x) %>%
-    dplyr::bind_rows(expiration) %>%
-    dplyr::group_by(loss_type) %>%
-    dplyr::filter(open_date == max(open_date)) %>%
-    dplyr::ungroup() %>%
-    dplyr::mutate(rank = rank(-portfolio)) %>%
-    dplyr::select(symbol, loss_type, rank) %>%
-    tidyr::spread(., key = loss_type, value = rank)
-  
-  all_loss_table <- rbind(all_loss_table, this_loss_table) 
-  assign("all_loss_table", all_loss_table, envir = .GlobalEnv)
+    dplyr::bind_rows(loss_5_x)
 }
 ```
 
 #### Run the study with purrr::map on each symbol
 
 ```r
-invisible(purrr::map(stock_list, study))
+results <- purrr::pmap_dfr(list(args$symbol, args$tar_dte, args$tar_delta_put,
+                           args$tar_delta_call), study)
+
+agg_table <- results %>%
+    dplyr::group_by(symbol, loss_type) %>%
+    dplyr::filter(open_date == max(open_date)) %>%
+    dplyr::ungroup() %>%
+    dplyr::mutate(rank = rank(-portfolio)) %>%
+    dplyr::select(symbol, loss_type, rank) %>%
+    tidyr::spread(., key = loss_type, value = rank)
 ```
 
 #### Group returns to similar portfolio outcomes and split so the plots are not as large
 
 
 ```r
-group_one_returns <- all_results %>%
-  dplyr::filter(symbol %in% c("EWZ", "TLT", "SLV", "FXI", "XLE", "EEM", "FXE"))
-group_two_returns <- all_results %>%
-  dplyr::filter(symbol %in% c("GLD", "QQQ", "DIA", "IWM", "IBM", "SPY", "MA"))
+group_one_returns <- results %>%
+  dplyr::filter(symbol %in% c("SPY", "IWM", "GLD", "QQQ", "DIA"))
+group_two_returns <- results %>%
+  dplyr::filter(symbol %in% c("TLT", "XLE", "EEM", "EWZ", "FXE"))
 
 grouped_plot <- function(df) {
   ggplot(data = df, aes(x = quotedate, y = portfolio)) +
@@ -167,7 +157,7 @@ grouped_plot <- function(df) {
     geom_line(data = dplyr::filter(df, loss_type == "expiration"),
               aes(color = "expiration")) +
     scale_fill_brewer() +
-    theme_dark() + 
+    theme_minimal() + 
     labs(title = "Portfolio Total Return (by stop loss)", x = "Trade Open Date",
          y = "Portfolio Value") +
     facet_grid(rows = vars(symbol), scales = "free_y")
@@ -188,9 +178,8 @@ grouped_plot(group_two_returns)
 These are ranked from (1-6) 1 being best  
 On average holding to expiration performed best and stopping out too early performed the worst as seen in the mean row at the bottom.  
 
-
 ```r
-df_heatmap <- all_loss_table %>%
+df_heatmap <- agg_table %>%
   dplyr::bind_rows(summarise_all(., funs(if (is.numeric(.)) mean(.) else "_Mean"))) %>%
   data.table::melt(., id = 1, measure = 2:7)
 
@@ -208,5 +197,3 @@ ggplot(df_heatmap, aes(variable, symbol)) +
 ```
 
 <img src="/post/2018-07-13-tradeoff-of-stop-losses_files/figure-html/heatmap-1.png" width="768" />
-
-
