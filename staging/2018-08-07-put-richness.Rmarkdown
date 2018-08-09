@@ -1,0 +1,174 @@
+---
+title: Put Richness
+author: Jason Taylor
+date: '2018-08-07'
+draft: TRUE
+slug: put-richness
+categories:
+  - Tastytrade
+tags:
+  - Strangles
+description: ''
+topics: []
+---
+
+### Market Measures - August 07, 2018
+
+On average, puts trade at a higher premium to calls at the same delta. Is a higher put/call price ratio indicative of better POP or average P/L?  
+
+Study:
+SPY, 2005-2017, 45 DTE
+Sold 16 delta strangles
+Compared:
+Selling strangles when the price ratio was above average (>1.8)
+Selling strangles when the price ratio was below average (<1.8)
+All trades held to expiration
+
+#### Tastytrade results:  
+We find that a higher put/call price ratio leads to double the P/L in the long run while containing half the risk.
+
+This ratio is essentially a measure of IV at the 1SD level. Using this ratio in conjunction with IVR, i.e. looking for high IVR and a high put/call price ratio, would be the ideal scenario for selling strangles.  
+
+#### My Results:
+
+#### Setup global options, load libraries:
+
+```{r global_options, include = TRUE, results = FALSE}
+knitr::opts_chunk$set(message = FALSE, tidy.opts = list(width.cutoff = 60)) 
+suppressWarnings(suppressMessages(suppressPackageStartupMessages({
+  library_list <- c("tidyverse", "tastytrade", "here", "htmlwidgets")
+  lapply(library_list, require, character.only = TRUE)})))
+args <- expand.grid(symbol = c("SPY", "IWM", "GLD", "QQQ", "DIA",
+                               "TLT","XLE", "EEM", "EWZ", "FXE"),
+                    tar_dte = 45,
+                    tar_delta_put = -0.16,
+                    tar_delta_call = 0.16,
+                    stringsAsFactors = FALSE)
+```
+
+```{r study}
+study <- function(stock, tar_dte, tar_delta_put, tar_delta_call) {
+  rs_conn <- tastytrade::redshift_connect("TASTYTRADE")
+  options <- rs_conn %>%
+    dplyr::tbl(stock) %>%
+    dplyr::mutate(m_dte = abs(dte - tar_dte))
+  
+  opened_puts <- tastytrade::open_short(options, tar_delta_put, "put")
+  opened_calls <- tastytrade::open_short(options, tar_delta_call, "call")
+  
+  sub_options <- options %>%
+    dplyr::filter(quotedate == expiration,
+                  strike %in% 
+                    c(opened_puts$put_strike, opened_calls$call_strike)) %>%
+    dplyr::collect() %>%
+    dplyr::mutate(quotedate = as.Date(quotedate, format = "%Y-%m-%d"),
+                  expiration = as.Date(expiration, format = "%Y-%m-%d"))
+  
+  closed_puts <- purrr::pmap_dfr(list(list(sub_options), opened_puts$quotedate,
+                                      opened_puts$expiration, list("put"), 
+                                      opened_puts$put_strike, 
+                                      opened_puts$put_open_credit),
+                                 tastytrade::close_short_exp)
+  
+  closed_calls <- purrr::pmap_dfr(list(list(sub_options), opened_calls$quotedate,
+                                       opened_calls$expiration, list("call"), 
+                                       opened_calls$call_strike, 
+                                       opened_calls$call_open_credit),
+                                  tastytrade::close_short_exp)
+  
+  dplyr::left_join(closed_puts, closed_calls, 
+                   by = c("symbol", "quotedate",
+                          "expiration", "open_date")) 
+}
+```
+
+```{r run study}
+results <- purrr::pmap_dfr(list(args$symbol, args$tar_dte, args$tar_delta_put,
+                                args$tar_delta_call), study) 
+```
+
+```{r plot data}
+plot <- results %>%
+  dplyr::filter(put_credit > 0, call_credit > 0) %>%
+  dplyr::mutate(pc_ratio = put_credit / call_credit,
+                profit = (put_profit + call_profit) * 100,
+                profitable = ifelse(profit > 0, 1, 0)) %>%
+  dplyr::group_by(symbol) %>%
+  dplyr::arrange(open_date) %>%
+  dplyr::mutate(symbol_count = n(),
+                mean_profit_all = mean(profit),
+                win_rate_all = sum(profitable) / symbol_count,
+                sd_profit_all = sd(profit),
+                run_sd = TTR::runSD(pc_ratio, n = 252),
+                run_mean = TTR::runMean(pc_ratio, n = 252),
+                lower = run_mean - run_sd,
+                upper = run_mean + run_sd,
+                above_upper = ifelse(pc_ratio > upper, 1, 0),
+                above_run_mean = ifelse(pc_ratio > run_mean, 1, 0)) %>%
+  dplyr::ungroup() %>%
+  dplyr::group_by(symbol, above_upper, above_run_mean) %>%
+  dplyr::mutate(mean_profit = mean(profit),
+                count = n(),
+                sd_profit = sd(profit),
+                win_rate = sum(profitable) / count) %>%
+  dplyr::ungroup() %>%
+  dplyr::select(symbol, open_date, pc_ratio, profitable, lower, upper, 
+                above_upper, mean_profit_all, mean_profit, win_rate, win_rate_all,
+                above_run_mean, sd_profit, sd_profit_all, run_sd, run_mean)
+```
+
+```{r plot}
+spy <- dplyr::filter(plot, symbol == "SPY")
+ggplot(data = spy, aes(x = open_date, y = pc_ratio, 
+                        colour = factor(profitable))) +
+  geom_point(size = 0.25) +
+  geom_ribbon(aes(ymin = lower, ymax = upper, x = open_date, 
+                  fill = "band"), alpha = 0.2) +
+  scale_colour_manual("",values = c("red", "black")) +
+  scale_fill_manual("",values = "grey12")
+```
+
+
+```{r metrics table}
+metrics <- plot %>%
+  dplyr::select(symbol, above_upper, above_run_mean, 
+                mean_profit_all, mean_profit, win_rate, win_rate_all,
+                sd_profit, sd_profit_all) %>%
+  dplyr::distinct() %>%
+  tidyr::replace_na(list(above_upper = 2, above_run_mean = 2)) %>%
+  dplyr::mutate(mean_profit_above_upper = ifelse(above_upper == 1, mean_profit, NA),
+                mean_profit_above_run_mean = ifelse(above_upper == 0 & above_run_mean == 1, mean_profit, NA),
+                win_rate_above_upper = ifelse(above_upper == 1, win_rate, NA),
+                win_rate_above_run_mean = ifelse(above_upper == 0 & above_run_mean == 1, win_rate, NA),
+                sd_profit_above_upper = ifelse(above_upper == 1, sd_profit, NA),
+                sd_profit_above_run_mean = ifelse(above_upper == 0 & above_run_mean == 1, sd_profit, NA)) %>%
+  dplyr::select(symbol, 
+                mean_profit_all, mean_profit_above_upper, mean_profit_above_run_mean,
+                win_rate_all, win_rate_above_upper, win_rate_above_run_mean,
+                sd_profit_all, sd_profit_above_upper, sd_profit_above_run_mean) %>%
+  dplyr::group_by(symbol) %>% 
+  dplyr::summarise_all(funs(mean(., na.rm = TRUE))) %>%
+  dplyr::mutate(mean_profit_all = scales::dollar(mean_profit_all), 
+                mean_profit_above_upper = scales::dollar(mean_profit_above_upper), 
+                mean_profit_above_run_mean = scales::dollar(mean_profit_above_run_mean),
+                win_rate_all = scales::percent(win_rate_all), 
+                win_rate_above_upper = scales::percent(win_rate_above_upper), 
+                win_rate_above_run_mean = scales::percent(win_rate_above_run_mean),
+                sd_profit_all = scales::dollar(sd_profit_all), 
+                sd_profit_above_upper = scales::dollar(sd_profit_above_upper), 
+                sd_profit_above_run_mean = scales::dollar(sd_profit_above_run_mean))
+
+knitr::kable(metrics, digits = 2, format = "html", 
+             caption = "Metrics for selling strangles based on Put Call Ratio",
+             col.names = c("SYM", "ALL", "ABOVE UPPER", "ABOVE RUN MEAN",
+                           "ALL", "ABOVE UPPER", "ABOVE RUN MEAN",
+                           "ALL", "ABOVE UPPER", "ABOVE RUN MEAN"),
+             escape = FALSE, 
+             align = c('l', 'r', 'r', 'r', 'r', 'r', 'r', 'r', 'r', 'r')) %>%
+  kableExtra::kable_styling(bootstrap_options = "striped", 
+                            full_width = FALSE) %>%
+  kableExtra::add_header_above(., c(" ", "MEAN PnL" = 3,
+                                    "WIN RATE" = 3, 
+                                    "SD PnL" = 3)) %>%
+  kableExtra::column_spec(., 1:10, width = "1.0in")
+```

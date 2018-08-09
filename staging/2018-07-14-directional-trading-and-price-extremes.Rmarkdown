@@ -1,0 +1,239 @@
+---
+title: Directional Trading and Price Extremes
+author: Jason Taylor
+date: '2018-07-11'
+draft: FALSE
+slug: directional-trading-and-price-extremes
+summary: How do naked short options perform after large price movements and at price extremes?
+categories:
+  - Tastytrade
+tags: []
+header:
+  caption: ''
+  image: ''
+---
+
+### Market Measures - July 11, 2018
+
+How do naked short options perform after large price movements or price extremes?
+
+The tastytrade Research Department used 45 DTE options in SPY to see if the following setup worked from 2005 to now.
+I will use 10 symbols that I have the most data for from Jan 2012 - March 2018.
+If the market went lower, sell a 30 delta put, and if it went higher, sell a 30 delta call. 
+
+#### Tastytrade results:  
+We find that that selling puts into weakness (either measured by days or % moves) did yield a substantial profit. Selling calls into strength yielded decent profits when waiting for large percentage moves up over number of up days.  
+
+#### My Results:
+I found that there was variation in results between symbols and less success in selling calls than puts. One possible reason for the difference in results in SPY alone is the date range as the period 2012-18 is decidedly bullish and calls did not perform well here. Several symbols lost money in all slices. See results tables at the end of this post. More analysis can be done here, and I may come back to this one.
+
+Here I will recreate this study and extend it to include more underlyings again with emphasis on learning new coding practices. As always recreating the Market Measure study will be done utilizing the tastytrade package on  [github](https://github.com/themechanicalbear/tastytrade).
+
+#### Setup global options, load libraries:
+
+```{r global_options, include = TRUE, results = FALSE}
+knitr::opts_chunk$set(message = FALSE, tidy.opts = list(width.cutoff = 60)) 
+suppressWarnings(suppressMessages(suppressPackageStartupMessages({
+  library_list <- c("tidyverse", "tastytrade", "here", "htmlwidgets")
+  lapply(library_list, require, character.only = TRUE)})))
+stock_list <- c("SPY", "IWM", "GLD", "QQQ", "DIA",
+                "TLT", "XLE", "EEM", "EWZ", "FXE")
+monthly <- readRDS(paste0(here::here(), "/data/monthly.RDS"))
+args <- expand.grid(symbol = stock_list,
+                    tar_dte = 45,
+                    tar_delta_put = -0.30,
+                    tar_delta_call = 0.30,
+                    stringsAsFactors = FALSE)
+```
+
+#### Study function
+
+```{r study}
+study <- function(stock, tar_dte, tar_delta_put, tar_delta_call) {
+  rs_conn <- tastytrade::redshift_connect("TASTYTRADE")
+  options <- rs_conn %>%
+    dplyr::tbl(stock) %>%
+    dplyr::mutate(m_dte = abs(dte - tar_dte))
+  
+  each_day <- options %>%
+    dplyr::distinct(symbol, quotedate, close_price) %>%
+    dplyr::collect() %>%
+    dplyr::mutate(quotedate = as.Date(quotedate, format = "%Y-%m-%d"))
+  
+  weekly_change <- each_day %>%
+    dplyr::arrange(quotedate) %>%
+    dplyr::mutate(quotedate = as.Date(quotedate, format = "%Y-%m-%d"),
+                  year = lubridate::year(quotedate),
+                  week = lubridate::week(quotedate)) %>%
+    dplyr::group_by(year, week) %>%
+    dplyr::mutate(rank = rank(quotedate)) %>%
+    dplyr::filter(rank == min(rank) | rank == max(rank)) %>%
+    dplyr::mutate(delta = close_price - lag(close_price, 1)) %>%
+    dplyr::mutate(delta = ifelse(is.na(delta), max(delta, na.rm = TRUE),
+                                 delta)) %>%
+    dplyr::filter(rank == 1) %>%
+    dplyr::ungroup() %>%
+    dplyr::mutate(return = (delta / close_price) * 100) %>% 
+    dplyr::filter(!return == "-Inf")
+  
+  open_puts <- tastytrade::open_short(options, tar_delta_put, "put")
+  open_calls <- tastytrade::open_short(options, tar_delta_call, "call")
+  
+  expirations <- options %>%
+    dplyr::filter(quotedate == expiration) %>%
+    dplyr::filter(strike %in% c(open_puts$put_strike, open_calls$call_strike)) %>%
+    dplyr::filter(expiration %in% c(open_puts$expiration, open_calls$expiration)) %>%
+    dplyr::collect() %>%
+    dplyr::mutate(quotedate = as.Date(quotedate, format = "%Y-%m-%d"),
+                  expiration = as.Date(expiration, format = "%Y-%m-%d"))
+  
+  closed_puts <- purrr::pmap_dfr(list(list(expirations),
+                                      open_puts$quotedate,
+                                      open_puts$expiration,
+                                      list("put"),
+                                      open_puts$put_strike,
+                                      open_puts$put_open_credit), 
+                                 tastytrade::close_short_exp) %>%
+    dplyr::right_join(each_day, by = c("symbol", "quotedate")) %>%
+    dplyr::filter(complete.cases(.))
+  
+  closed_calls <- purrr::pmap_dfr(list(list(expirations),
+                                       open_calls$quotedate,
+                                       open_calls$expiration,
+                                       list("call"),
+                                       open_calls$call_strike,
+                                       open_calls$call_open_credit), 
+                                  tastytrade::close_short_exp) %>%
+    dplyr::right_join(each_day, by = c("symbol", "quotedate")) %>%
+    dplyr::filter(complete.cases(.))
+  
+  list(each_day, weekly_change, closed_puts, closed_calls)
+}
+```
+
+#### Run study
+
+```{r run study, warning = FALSE}
+results <- purrr::pmap(list(args$symbol, args$tar_dte, args$tar_delta_put,
+                            args$tar_delta_call), study)
+```
+
+#### Aggregation of results
+
+```{r}
+consecutive_days <- map(results, 1) %>% dplyr::bind_rows() %>%
+  dplyr::group_by(symbol) %>%
+  dplyr::arrange(quotedate) %>%
+  dplyr::mutate(down_one = ifelse(close_price < lag(close_price, 1), 1, 0)) %>%
+  dplyr::mutate(down_two = ifelse((down_one == 1 & close_price < 
+                                     lag(close_price, 2)), 1, 0)) %>%
+  dplyr::mutate(down_three = ifelse((down_two == 1 & close_price < 
+                                       lag(close_price, 3)), 1, 0)) %>%
+  dplyr::mutate(up_one = ifelse(close_price > lag(close_price, 1), 1, 0)) %>%
+  dplyr::mutate(up_two = ifelse((up_one == 1 & close_price > 
+                                   lag(close_price, 2)), 1, 0)) %>%
+  dplyr::mutate(up_three = ifelse((up_two == 1 & close_price > 
+                                     lag(close_price, 3)), 1, 0)) %>%
+  dplyr::ungroup() %>%
+  dplyr::filter(complete.cases(.))
+
+weekly_change <- map(results, 2) %>% dplyr::bind_rows() %>%
+  dplyr::select(symbol, year, week, return) %>%
+  dplyr::mutate(down_one_per = ifelse(return <= -1, 1, 0)) %>%
+  dplyr::mutate(down_two_per = ifelse(return <= -2, 1, 0)) %>%
+  dplyr::mutate(down_three_per = ifelse(return <= -3, 1, 0)) %>%
+  dplyr::mutate(up_one_per = ifelse(return >= 1, 1, 0)) %>%
+  dplyr::mutate(up_two_per = ifelse(return >= 2, 1, 0)) %>%
+  dplyr::mutate(up_three_per = ifelse(return >= 3, 1, 0))
+
+puts <- map(results, 3) %>% dplyr::bind_rows() %>%
+  dplyr::mutate(year = lubridate::year(quotedate),
+                week = lubridate::week(quotedate)) %>%
+  dplyr::left_join(consecutive_days, 
+                   by = c("symbol", "quotedate", "close_price")) %>%
+  dplyr::left_join(weekly_change, by = c("symbol", "year", "week"))
+
+calls <- map(results, 4) %>% dplyr::bind_rows() %>%
+  dplyr::mutate(year = lubridate::year(quotedate),
+                week = lubridate::week(quotedate)) %>%
+  dplyr::left_join(consecutive_days, 
+                   by = c("symbol", "quotedate", "close_price")) %>%
+  dplyr::left_join(weekly_change, by = c("symbol", "year", "week"))
+```
+
+#### Calculate metrics
+
+```{r}
+# Reference this function design from:
+# https://github.com/r-lib/rlang/issues/116
+
+metrics_calc <- function(data, col, op, value, env = parent.frame()) {
+  met <- paste0("mean_", col)
+  cond <- call(op, sym(col), value)
+  cond <- rlang::new_quosure(cond, env)
+  
+  data %>%
+    dplyr::group_by(symbol) %>%
+    dplyr::filter(!!cond) %>%
+    dplyr::mutate(!!met := mean(profit)) %>%
+    dplyr::distinct(symbol, !!sym(met))
+}
+
+put_metrics <- c("down_one", "down_two", "down_three",
+                 "down_one_per", "down_two_per", "down_three_per")
+call_metrics <- c("up_one", "up_two", "up_three",
+                  "up_one_per", "up_two_per", "up_three_per")
+
+put_results <- purrr::pmap_dfr(list(list(puts), put_metrics, "==", 1),
+                               metrics_calc) %>%
+  dplyr::group_by(symbol) %>% 
+  dplyr::summarise_all(funs(sum(., na.rm = TRUE)))
+
+
+call_results <- purrr::pmap_dfr(list(list(calls), call_metrics, "==", 1),
+                                metrics_calc) %>%
+  dplyr::group_by(symbol) %>% 
+  dplyr::summarise_all(funs(sum(., na.rm = TRUE)))
+
+metrics <- dplyr::left_join(put_results, call_results, by = "symbol")
+```
+
+#### Metric results from put selling
+
+```{r tab1}
+pnl_puts <- metrics %>%
+  dplyr::select(c(symbol, mean_down_one, mean_down_two, mean_down_three,
+                  mean_down_one_per, mean_down_two_per, mean_down_three_per)) %>%
+  dplyr::arrange(desc(symbol))
+
+knitr::kable(pnl_puts, digits = 2, format = "html", 
+             caption = "Mean P/L for selling puts into down moves",
+             col.names = c("SYM", "1 DAY", "2 DAY", "3 DAY",
+                           "1 PERCENT", "2 PERCENT", "3 PERCENT"),
+             escape = FALSE, 
+             align = c('l', 'r', 'r', 'r', 'r', 'r', 'r')) %>%
+  kableExtra::kable_styling(bootstrap_options = "striped", 
+                            full_width = FALSE) %>%
+  kableExtra::add_header_above(., c(" ", "MEAN PnL" = 6)) %>%
+  kableExtra::column_spec(., 1:7, width = "1.0in")
+```
+
+#### Metric results from call selling
+
+```{r tab2}
+pnl_calls <- metrics %>%
+  dplyr::select(c(symbol, mean_up_one, mean_up_two, mean_up_three,
+                  mean_up_one_per, mean_up_two_per, mean_up_three_per)) %>%
+  dplyr::arrange(desc(symbol))
+
+knitr::kable(pnl_calls, digits = 2, format = "html", 
+             caption = "Mean P/L for selling calls into up moves",
+             col.names = c("SYM", "1 DAY", "2 DAY", "3 DAY",
+                           "1 PERCENT", "2 PERCENT", "3 PERCENT"),
+             escape = FALSE, 
+             align = c('l', 'r', 'r', 'r', 'r', 'r', 'r')) %>%
+  kableExtra::kable_styling(bootstrap_options = "striped", 
+                            full_width = FALSE) %>%
+  kableExtra::add_header_above(., c(" ", "MEAN PnL" = 6)) %>%
+  kableExtra::column_spec(., 1:7, width = "1.0in")
+```

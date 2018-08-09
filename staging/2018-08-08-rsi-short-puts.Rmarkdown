@@ -1,0 +1,95 @@
+---
+title: RSI Short Puts
+author: Jason
+date: '2018-08-08'
+draft: TRUE
+slug: rsi-short-puts
+categories:
+  - Original
+tags:
+  - Short Put
+  - RSI
+description: ''
+topics: []
+---
+
+#### My Results:
+
+#### Setup global options, load libraries:
+
+```{r global_options, include = TRUE, results = FALSE}
+knitr::opts_chunk$set(message = FALSE, tidy.opts = list(width.cutoff = 60)) 
+suppressWarnings(suppressMessages(suppressPackageStartupMessages({
+  library_list <- c("tidyverse", "tastytrade", "here", "htmlwidgets")
+  lapply(library_list, require, character.only = TRUE)})))
+args <- expand.grid(symbol = c("SPY", "IWM", "GLD", "QQQ", "DIA",
+                               "TLT","XLE", "EEM", "EWZ", "FXE"),
+                    tar_dte = 45,
+                    tar_delta_put = -0.30,
+                    stringsAsFactors = FALSE)
+```
+
+```{r study}
+study <- function(stock, tar_dte, tar_delta_put) {
+  rs_conn <- tastytrade::redshift_connect("TASTYTRADE")
+  options <- rs_conn %>%
+    dplyr::tbl(stock) %>%
+    dplyr::mutate(m_dte = abs(dte - tar_dte))
+  
+  rsi <- options %>%
+    dplyr::distinct(symbol, quotedate, close_price) %>%
+    dplyr::collect() %>%
+    dplyr::mutate(rsi = TTR::RSI(close_price, n = 14),
+                  rsi_lag = lag(rsi, 1)) %>%
+    dplyr::filter(rsi > 30, rsi_lag < 30)
+  
+  rsi_options <- dplyr::filter(options, quotedate %in% rsi$quotedate)
+  
+  opened_puts <- tastytrade::open_short(rsi_options, tar_delta_put, "put")
+  
+  sub_options <- options %>%
+    dplyr::filter(quotedate == expiration,
+                  strike %in% opened_puts$put_strike) %>%
+    dplyr::collect() %>%
+    dplyr::mutate(quotedate = as.Date(quotedate, format = "%Y-%m-%d"),
+                  expiration = as.Date(expiration, format = "%Y-%m-%d"))
+  
+  purrr::pmap_dfr(list(list(sub_options), opened_puts$quotedate,
+                                      opened_puts$expiration, list("put"), 
+                                      opened_puts$put_strike, 
+                                      opened_puts$put_open_credit),
+                                 tastytrade::close_short_exp)
+}
+```
+
+```{r run study}
+results <- purrr::pmap_dfr(list(args$symbol, args$tar_dte,
+                                args$tar_delta_put), study)
+```
+
+```{r plot data}
+metrics <- results %>%
+  dplyr::group_by(symbol) %>%
+  dplyr::mutate(trade_count = n(),
+                profitable = ifelse(put_profit > 0, 1, 0),
+                win_rate = sum(profitable) / trade_count,
+                mean_credit = scales::dollar(mean(put_credit * 100)),
+                mean_profit = scales::dollar(mean(put_profit * 100)),
+                total_profit = scales::dollar(sum(put_profit * 100))) %>%
+  dplyr::distinct(symbol, trade_count, win_rate, mean_credit, mean_profit,
+                  total_profit) %>%
+  dplyr::arrange(desc(win_rate)) %>%
+  dplyr::mutate(win_rate = scales::percent(win_rate))
+```
+
+```{r metrics table}
+knitr::kable(metrics, digits = 2, format = "html", 
+             caption = "Metrics for selling puts after cross above RSI 30",
+             col.names = c("SYM", "TRADE COUNT", "WIN RATE", "MEAN CREDIT",
+                           "MEAN PROFIT", "TOTAL PROFIT"),
+             escape = FALSE, 
+             align = c('l', 'r', 'r', 'r', 'r', 'r')) %>%
+  kableExtra::kable_styling(bootstrap_options = "striped", 
+                            full_width = FALSE) %>%
+  kableExtra::column_spec(., 1:6, width = "1.0in")
+```

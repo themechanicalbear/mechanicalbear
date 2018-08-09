@@ -1,0 +1,171 @@
+---
+title: Managing Earlier - Stock Movement
+author: Jason Taylor
+date: '2018-07-12'
+draft: TRUE
+slug: managing-earlier-stock-movement
+summary: Why does managing positions earlier reduce portfolio volatility?
+categories:
+  - Tastytrade
+tags:
+  - Stock
+  - Volatility
+header:
+  caption: ''
+  image: ''
+---
+
+### Market Measures - July 12, 2018
+
+Why does managing positions earlier reduce portfolio volatility? Gamma risk is one answer. But to be more intuitive, we can look at how a stock moves over the course of a trade held to expiration versus how much a stock changes when the position is managed early.
+
+Compared stock movement by:
+
+Holding-to-expiration and managing earlier
+Stock prices at order entry and at exit point for all occurrences  
+
+#### Results:  
+We find that the stock moves (on average) a lot less over a 22 day period than a 45 day period. This translates to lower portfolio volatility because you are less exposed to directional movements.
+
+#### Setup global options, load libraries:
+
+```{r global_options, include = TRUE, results = FALSE}
+knitr::opts_chunk$set(message = FALSE, tidy.opts = list(width.cutoff = 60)) 
+suppressWarnings(suppressMessages(suppressPackageStartupMessages({
+  library_list <- c("tastytrade", "tidyverse", "here", "RJDBC",
+                    "data.table", "knitr", "kableExtra")
+  lapply(library_list, require, character.only = TRUE)})))
+stock_list <- c("SPY", "IWM", "GLD", "QQQ", "DIA",
+                "TLT", "XLE", "EEM", "EWZ", "FXE")
+args <- expand.grid(symbol = c("SPY", "IWM", "GLD", "QQQ", "DIA",
+                               "TLT", "XLE", "EEM", "EWZ", "FXE"),
+                    tar_dte = 45,
+                    tar_mid_dte = 21,
+                    stringsAsFactors = FALSE) %>%
+  dplyr::arrange(symbol)
+monthly <- readRDS(paste0(here::here(), "/data/monthly.RDS"))
+```
+
+#### Study function
+
+```{r study}
+study <- function(stock, tar_dte, early_exit) {
+  rs_conn <- tastytrade::redshift_connect("TASTYTRADE")
+  options <- rs_conn %>%
+    dplyr::tbl(stock) %>%
+    dplyr::mutate(m_dte = abs(dte - tar_dte))
+  
+  expirations <- dplyr::filter(options, quotedate == expiration) %>%
+    dplyr::distinct(quotedate, close_price, expiration) %>%
+    dplyr::collect()
+  
+  dte_45 <- options %>%
+    dplyr::filter(quotedate %in% monthly$date) %>%
+    dplyr::group_by(quotedate) %>%
+    dplyr::filter(m_dte == min(m_dte, na.rm = TRUE)) %>%
+    dplyr::ungroup() %>%
+    dplyr::distinct(quotedate, close_price, expiration, dte) %>%
+    dplyr::collect()
+  
+  dte_22 <- purrr::pmap_dfr(list(list(options),
+                                 early_exit, dte_45$expiration),
+                            tastytrade::dte_exit)
+  
+  RJDBC::dbDisconnect(rs_conn)
+  
+  dplyr::left_join(dte_45, dte_22, by = "expiration") %>%
+    dplyr::left_join(expirations, by = "expiration") %>%
+    dplyr::distinct() %>%
+    magrittr::set_colnames(., c("open_date", "open_price", "expiration",
+                                "open_dte", "mid_date", "mid_price",
+                                "mid_dte", "close_date", "close_price")) %>%
+    dplyr::mutate(symbol = stock,
+                  mid_diff = mid_price - open_price,
+                  close_diff = close_price - open_price,
+                  mid_return = (mid_price - open_price) / open_price,
+                  close_return = (close_price - open_price) / open_price) %>%
+    dplyr::mutate(early_better = ifelse(abs(close_diff) >= abs(mid_diff),
+                                        1, 0)) %>%
+    dplyr::filter(complete.cases(.))
+}
+```
+
+#### Run study against stock list
+
+```{r results}
+results <- 
+  purrr::pmap_dfr(list(args$symbol, args$tar_dte, args$tar_mid_dte), study)
+```
+
+#### Plot absolute value of price changes showing less volatility when closed early
+
+```{r plots}
+gp1 <- dplyr::filter(results, symbol %in% c("SPY", "IWM", "GLD", "QQQ", "DIA"))
+gp2 <- dplyr::filter(results, symbol %in% c("TLT", "XLE", "EEM", "EWZ", "FXE"))
+
+grouped_plot <- function(df) {
+  ggplot(data = df, aes(x = as.Date(open_date, format = "%Y-%m-%d"), 
+                        y = abs(mid_diff), color = "mid price")) +
+    geom_line() +
+    geom_line(data = df, aes(x = as.Date(open_date, format = "%Y-%m-%d"),
+                             y = abs(close_diff), color = "close price")) +
+    scale_fill_brewer() +
+    theme_minimal() +
+    labs(title = "(abs) stock value change compared to open price", x = "Date",
+         y = "Stock change") +
+    facet_grid(rows = vars(symbol), scales = "free_y")
+}
+
+grouped_plot(gp1)
+grouped_plot(gp2)
+```
+
+#### Percentage of days when closing earlier reduced abs price change
+
+```{r}
+early_better_pct <- results %>%
+  dplyr::group_by(symbol, early_better) %>%
+  dplyr::summarise(n = n()) %>%
+  dplyr::mutate(freq = n / sum(n)) %>%
+  dplyr::ungroup() %>%
+  dplyr::filter(early_better == 1) %>%
+  dplyr::select(symbol, freq) %>%
+  dplyr::arrange(desc(freq))
+
+ggplot(early_better_pct, aes(x = symbol, y = freq)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(title = "Percent when price change is less after 22 days than 45",
+       x = "Symbol", y = "Percentage")
+```
+
+#### Table with closing metrics
+
+```{r metrics}
+return_metrics <- results %>%
+  dplyr::group_by(symbol) %>%
+  dplyr::mutate(avg_mid = scales::percent(mean(mid_return)),
+                avg_close = scales::percent(mean(close_return)),
+                max_mid = scales::percent(max(mid_return)),
+                max_close = scales::percent(max(close_return)),
+                min_mid = scales::percent(min(mid_return)),
+                min_close = scales::percent(min(close_return)),
+                sd_mid = scales::percent(sd(mid_return)),
+                sd_close = scales::percent(sd(close_return))) %>%
+  dplyr::ungroup() %>%
+  dplyr::distinct(symbol, avg_mid, avg_close, max_mid, max_close,
+                  min_mid, min_close, sd_mid, sd_close) %>%
+  dplyr::arrange(symbol)
+
+knitr::kable(return_metrics, digits = 2, format = "html",
+             caption = "Percentage Returns and Standard Deviation",
+             col.names = c("SYM", "MID", "CLOSE", "MID", "CLOSE",
+                           "MID", "CLOSE", "MID", "CLOSE"),
+             escape = FALSE, 
+             align = c('l', 'r', 'r', 'r', 'r', 'r', 'r', 'r', 'r')) %>%
+  kableExtra::kable_styling(bootstrap_options = "striped", 
+                            full_width = FALSE) %>%
+  kableExtra::add_header_above(., c(" ", "  AVG" = 2, "  MAX" = 2,
+                                    "  MIN" = 2, "  SD" = 2)) %>%
+  kableExtra::column_spec(., 1:9, width = "1.0in")
+```
