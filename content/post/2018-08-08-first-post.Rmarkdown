@@ -8,7 +8,7 @@ categories:
   - Original
 tags:
   - tastytrade
-  - '#rstats'
+  - 'rstats'
   - options
 description: ''
 topics: [first post, news]
