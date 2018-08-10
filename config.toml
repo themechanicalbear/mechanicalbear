@@ -62,11 +62,11 @@ theme = "blackburn"
     weight = 3
     identifier = "about"
     url = "/home/about/"
-  [[menu.main]]
-    name = "Contact"
-    pre = "<i class='fa fa-phone fa-fw'></i>"
-    weight = 4
-    url = "/home/contact/"
+  #[[menu.main]]
+  #  name = "Contact"
+  #  pre = "<i class='fa fa-phone fa-fw'></i>"
+  #  weight = 4
+  #  url = "/home/contact/"
 
 [social]
   # Link your social networking accounts to the side menu
