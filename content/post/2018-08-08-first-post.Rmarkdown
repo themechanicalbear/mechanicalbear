@@ -10,7 +10,7 @@ tags:
   - tastytrade
   - 'rstats'
   - options
-description: ''
+description: 'So, here is the plan...'
 topics: [first post, news]
 ---
 
