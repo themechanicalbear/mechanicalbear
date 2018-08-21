@@ -1,13 +1,16 @@
 ---
 title: Put Richness
 author: Jason Taylor
-date: '2018-08-07'
-draft: TRUE
+date: '2018-08-13'
+draft: FALSE
 slug: put-richness
 categories:
   - Tastytrade
 tags:
-  - Strangles
+  - strangles
+  - options
+  - put call ratio
+  - backtest study
 description: ''
 topics: []
 ---
@@ -16,18 +19,7 @@ topics: []
 
 On average, puts trade at a higher premium to calls at the same delta. Is a higher put/call price ratio indicative of better POP or average P/L?  
 <!--more-->
-#### Study:  
-* SPY, 2005-2017, 45 DTE
-* Sold 16 delta strangles
-  + Compared:  
-    - Selling strangles when the price ratio was above average (> 1.8)
-    - Selling strangles when the price ratio was below average (< 1.8)
-    - All trades held to expiration
-
-#### Tastytrade results:  
-A higher put/call price ratio leads to double the P/L in the long run while containing half the risk.
-
-This ratio is mostly a measure of IV at the 1SD level. Using this ratio in conjunction with IVR, i.e., looking for high IVR and a high put/call price ratio would be the ideal scenario for selling strangles.  
+#### Tastytrade study and results can be found [here](https://www.tastytrade.com/tt/shows/market-measures/episodes/put-richness-08-07-2018)
 
 #### Adjustments to the study:  
 * Including stocks in addition to SPY, (IWM, GLD, QQQ, DIA, TLT, XLE, EEM, EWZ, FXE) 
@@ -39,15 +31,19 @@ This ratio is mostly a measure of IV at the 1SD level. Using this ratio in conju
 * Including a standard deviation of the ratio as an additional entry condition input  
 * Split results by above running mean as well as above the running upper bound of the sd band
 
-#### My Results:  
-When choosing entry criteria of 45 DTE, 16 delta strangles, and closing at expiration waiting to enter until the pc ratio exceeds the trailing one yr mean or upper bound of SD did not have consistent results. SPY did show signs of benefiting from this strategy, but FXE, for example, did not. Depending on your objectives, if you are trading SPY only or want something consistent across more underlyings, these results may be useful or not in your trading. Either way, this exercise expanded the development to a point where entering and exiting strangles and calculating metrics has become easier. This result will allow me to continue writing posts and building this toolset into a robust backtesting system. Please read on for code snippets and summary plots.
+#### Results:  
+When choosing entry criteria of 45 DTE, 16 delta strangles, and closing at expiration waiting to enter until the pc ratio exceeds the trailing one yr mean or upper bound of SD did not have consistent results.  
+
+Several symbols did show signs of benefiting from this strategy, but FXE and GLD, for example, did not. 
+
+Depending on your objectives, if you are trading SPY only or want something consistent across more underlyings, these results may be useful or not in your trading. Either way, this exercise expanded the development to a point where entering and exiting strangles and calculating metrics has become easier. This result will allow us to continue writing posts that build the toolset into a robust backtesting system. Please read on for code snippets and summary plots.
 
 #### Setup global options, load libraries:
 
 ```{r global_options, include = TRUE, results = FALSE}
 knitr::opts_chunk$set(message = FALSE, tidy.opts = list(width.cutoff = 60)) 
 suppressWarnings(suppressMessages(suppressPackageStartupMessages({
-  library_list <- c("tidyverse", "tastytrade", "here", "htmlwidgets")
+  library_list <- c("tidyverse", "tastytrade", "here", "htmlwidgets", "TTR")
   lapply(library_list, require, character.only = TRUE)})))
 args <- expand.grid(symbol = c("SPY", "IWM", "GLD", "QQQ", "DIA",
                                "TLT","XLE", "EEM", "EWZ", "FXE"),
@@ -102,24 +98,23 @@ study <- function(stock, tar_dte, tar_delta_put, tar_delta_call) {
   
   dplyr::left_join(closed_puts, closed_calls, 
                    by = c("symbol", "quotedate", "expiration", "open_date",
-                          "open_stock_price")) 
+                          "open_stock_price"))
 }
 ```
 
 #### Run study  
 
-Using the purrr library to map the arguments list to our study function results in a dataframe of strangles to review
+Using the purrr library to map the arguments list to our function results in a dataframe of strangles for review
 
 ```{r run study}
 results <- purrr::pmap_dfr(list(args$symbol, args$tar_dte, args$tar_delta_put,
-                                args$tar_delta_call), study) 
-
+                                args$tar_delta_call), study)
 dplyr::glimpse(results)
 ```
 
 #### Calculate metrics  
 
-Using the results at expiration from the strangle trades we now can calculate additional metrics to be reviewed.
+Using the results at expiration from the strangle trades we can now calculate additional metrics.
 
 * Put/Call ratio based on delta
 * Profit
@@ -152,6 +147,7 @@ result_metrics <- results %>%
                 above_upper = ifelse(pc_ratio > upper, 1, 0),
                 above_run_mean = ifelse(pc_ratio > run_mean, 1, 0)) %>%
   dplyr::ungroup() %>%
+  dplyr::filter(complete.cases(.)) %>%
   dplyr::group_by(symbol, above_upper, above_run_mean) %>%
   dplyr::mutate(mean_profit = mean(profit),
                 mean_roc = mean(roc),
@@ -162,23 +158,25 @@ result_metrics <- results %>%
   dplyr::select(symbol, open_date, pc_ratio, profitable, lower,
                 upper, above_upper, mean_profit_all, mean_profit, win_rate,
                 win_rate_all, above_run_mean, sd_profit, sd_profit_all, run_sd,
-                run_mean, mean_roc, mean_roc_all)
+                run_mean, mean_roc, mean_roc_all, profit) 
 
 dplyr::glimpse(result_metrics)
 ``` 
 
 #### Plot the standard deviation of pc ratio bands  
 
-Using the upper band of the standard deviation for pc ratio as entry criteria gives a higher entry requirement and is more selective. This plot shows that band for the SPY, and later we will see how trading only those entries performs against all days above the mean value. At this point, we have quite a few rows with NA values due to the trailing one yr mean and sd. These will subsequently be removed because trades would not have been opened without this data. This ribbon plot shows this missing data in the first year on the left.
+Using the upper band of the standard deviation for pc ratio as entry criteria gives a higher entry requirement and is more selective. This plot shows that band for the SPY, and later we will see how trading only those entries performs against all days above the mean value.
 
 ```{r sd ribbon plot}
-spy <- dplyr::filter(result_metrics, symbol == "SPY")
-ggplot(data = spy, aes(x = open_date, y = pc_ratio)) +
+dplyr::filter(result_metrics, symbol == "SPY") %>%
+  ggplot(., aes(x = open_date, y = pc_ratio)) +
   geom_point(size = 0.35, aes(colour = factor(profitable))) +
   geom_ribbon(aes(ymin = lower, ymax = upper, x = open_date, 
-                  fill = "sd band"), alpha = 0.2) +
+                  fill = "1 Standard Deviation"), alpha = 0.2) +
   scale_fill_manual("",values = "grey12") + 
   theme_minimal() +
+  ylab("Put Call Ratio") + 
+  xlab("Trade Open Date") +
   ggtitle("1 Yr Standard Deviation PC Ratio Ribbon")
 ```
 
@@ -235,111 +233,43 @@ formatted_metrics <- metrics %>%
                 sd_profit_above_run_mean = scales::dollar(sd_profit_above_run_mean))
 ```
 
-#### Mean PnL 
+#### Mean and Standard Deviation PnL
 
-```{r}
+```{r Table 1}
 dplyr::select(formatted_metrics, 
               c(symbol, mean_profit_all, mean_profit_above_upper, 
-                mean_profit_above_run_mean)) %>%
-  knitr::kable(., digits = 2, format = "html", 
-               caption = "Mean PnL for selling strangles based on Put-Call Ratio",
-               col.names = c("SYM", "ALL", "ABOVE UPPER", "ABOVE RUN MEAN"),
-               escape = FALSE, 
-               align = c('l', 'r', 'r', 'r')) %>%
-  kableExtra::kable_styling(bootstrap_options = "striped", full_width = FALSE) %>%
-  kableExtra::add_header_above(., c(" ", "MEAN PnL" = 3)) %>%
-  kableExtra::column_spec(., 1:4, width = "0.5in")
-```
-
-#### Win Rates 
-
-```{r}
-dplyr::select(formatted_metrics, c(symbol, win_rate_all, win_rate_above_upper,
-                                   win_rate_above_run_mean)) %>%
-  knitr::kable(., digits = 2, format = "html", 
-               caption = "Win Rates for selling strangles based on Put-Call Ratio",
-               col.names = c("SYM", "ALL", "ABOVE UPPER", "ABOVE RUN MEAN"),
-               escape = FALSE, 
-               align = c('l', 'r', 'r', 'r')) %>%
-  kableExtra::kable_styling(bootstrap_options = "striped", full_width = FALSE) %>%
-  kableExtra::add_header_above(., c(" ", "Win Rate" = 3)) %>%
-  kableExtra::column_spec(., 1:4, width = "0.5in")
-```
-
-#### Standard Deviation PnL 
-
-```{r}
-dplyr::select(formatted_metrics, 
-              c(symbol, sd_profit_all, sd_profit_above_upper,
+                mean_profit_above_run_mean, sd_profit_all, sd_profit_above_upper,
                 sd_profit_above_run_mean)) %>%
   knitr::kable(., digits = 2, format = "html", 
-               caption = "Standard Deviation PnL for selling strangles based on Put-Call Ratio",
-               col.names = c("SYM", "ALL", "ABOVE UPPER", "ABOVE RUN MEAN"),
+               caption = "Mean & SD PnL for selling strangles based on Put-Call Ratio",
+               col.names = c("SYM", "ALL", "ABOVE UPPER", "ABOVE RUN MEAN",
+                             "ALL", "ABOVE UPPER", "ABOVE RUN MEAN"),
                escape = FALSE, 
-               align = c('l', 'r', 'r', 'r')) %>%
+               align = c('l', 'r', 'r', 'r', 'r', 'r', 'r')) %>%
   kableExtra::kable_styling(bootstrap_options = "striped", full_width = FALSE) %>%
-  kableExtra::add_header_above(., c(" ", "SD PnL" = 3)) %>%
-  kableExtra::column_spec(., 1:4, width = "0.5in")
+  kableExtra::add_header_above(., c(" ", "MEAN PnL" = 3, "SD PnL" = 3)) %>%
+  kableExtra::column_spec(., 1:7, width = "0.5in")
 ```
 
-#### Mean Profit by split
+#### Win Rates and Return on Capital
 
-```{r}
-dplyr::select(metrics, 
-              c(symbol, mean_profit_all, mean_profit_above_upper,
-                mean_profit_above_run_mean)) %>%
-  tidyr::gather(., Metric, Value, -symbol) %>%
-  ggplot(., aes(Metric, Value, fill = symbol)) + 
-  geom_col(position = "dodge") +
-  theme_minimal() +
-  ylab("Mean Profit") + 
-  xlab("Metric") +
-  ggtitle("Mean Profit split by mean, upper band sd, and all trades")
-```
-
-#### Win Percentages by split
-
-```{r}
-dplyr::select(metrics, 
+```{r Table 2}
+dplyr::select(formatted_metrics,
               c(symbol, win_rate_all, win_rate_above_upper,
-                win_rate_above_run_mean)) %>%
-  tidyr::gather(., Metric, Value, -symbol) %>%
-  dplyr::mutate(Value = Value * 100) %>%
-  ggplot(., aes(Metric, Value, fill = symbol)) + 
-  geom_col(position = "dodge") + 
-  scale_y_continuous("Win Rate", breaks = seq(55, 95, by = 10)) +
-  coord_cartesian(ylim = c(55, 95)) +
-  theme_minimal() + 
-  xlab("Metric")  +
-  ggtitle("Win percentages split by mean, upper band sd, and all trades")
+                win_rate_above_run_mean, mean_roc_all, 
+                mean_roc_above_upper, mean_roc_above_run_mean)) %>%
+  knitr::kable(., digits = 2, format = "html", 
+               caption = "Win Rates & ROC for selling strangles based on Put-Call Ratio",
+               col.names = c("SYM", "ALL", "ABOVE UPPER", "ABOVE RUN MEAN",
+                             "ALL", "ABOVE UPPER", "ABOVE RUN MEAN"),
+               escape = FALSE, 
+               align = c('l', 'r', 'r', 'r', 'r', 'r', 'r')) %>%
+  kableExtra::kable_styling(bootstrap_options = "striped", full_width = FALSE) %>%
+  kableExtra::add_header_above(., c(" ", "Win Rate" = 3, "ROC" = 3)) %>%
+  kableExtra::column_spec(., 1:7, width = "0.5in")
 ```
 
-#### Mean Standard Deviation of profit by split
+*If you have suggestions for studies, improvements for rstats code, or any other feedback please reach out with the contact links on the sidebar*
 
-```{r}
-dplyr::select(metrics, 
-              c(symbol, sd_profit_all, sd_profit_above_upper,
-                sd_profit_above_run_mean)) %>%
-  tidyr::gather(., Metric, Value, -symbol) %>%
-  ggplot(., aes(Metric, Value, fill = symbol)) + 
-  geom_col( position = "dodge") +
-  theme_minimal() +
-  ylab("Mean SD Profit") + 
-  xlab("Metric") +
-  ggtitle("SD Mean Profit split by mean, upper band sd, and all trades")
-```
-
-#### Mean ROC by split
-
-```{r}
-dplyr::select(metrics, 
-              c(symbol, mean_roc_all, mean_roc_above_upper,
-                mean_roc_above_run_mean)) %>%
-  tidyr::gather(., Metric, Value, -symbol) %>%
-  ggplot(., aes(Metric, Value, fill = symbol)) + 
-  geom_col( position = "dodge") +
-  theme_minimal() +
-  ylab("Mean ROC") + 
-  xlab("Metric") +
-  ggtitle("Return on Capital split by mean, upper band sd, and all trades")
-```
+#### Best,
+#### Jason

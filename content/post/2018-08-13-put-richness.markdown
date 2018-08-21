@@ -1,13 +1,16 @@
 ---
 title: Put Richness
 author: Jason Taylor
-date: '2018-08-07'
-draft: TRUE
+date: '2018-08-13'
+draft: FALSE
 slug: put-richness
 categories:
   - Tastytrade
 tags:
-  - Strangles
+  - strangles
+  - options
+  - put call ratio
+  - backtest study
 description: ''
 topics: []
 ---
@@ -16,18 +19,7 @@ topics: []
 
 On average, puts trade at a higher premium to calls at the same delta. Is a higher put/call price ratio indicative of better POP or average P/L?  
 <!--more-->
-#### Study:  
-* SPY, 2005-2017, 45 DTE
-* Sold 16 delta strangles
-  + Compared:  
-    - Selling strangles when the price ratio was above average (> 1.8)
-    - Selling strangles when the price ratio was below average (< 1.8)
-    - All trades held to expiration
-
-#### Tastytrade results:  
-A higher put/call price ratio leads to double the P/L in the long run while containing half the risk.
-
-This ratio is mostly a measure of IV at the 1SD level. Using this ratio in conjunction with IVR, i.e., looking for high IVR and a high put/call price ratio would be the ideal scenario for selling strangles.  
+#### Tastytrade study and results can be found [here](https://www.tastytrade.com/tt/shows/market-measures/episodes/put-richness-08-07-2018)
 
 #### Adjustments to the study:  
 * Including stocks in addition to SPY, (IWM, GLD, QQQ, DIA, TLT, XLE, EEM, EWZ, FXE) 
@@ -39,8 +31,12 @@ This ratio is mostly a measure of IV at the 1SD level. Using this ratio in conju
 * Including a standard deviation of the ratio as an additional entry condition input  
 * Split results by above running mean as well as above the running upper bound of the sd band
 
-#### My Results:  
-When choosing entry criteria of 45 DTE, 16 delta strangles, and closing at expiration waiting to enter until the pc ratio exceeds the trailing one yr mean or upper bound of SD did not have consistent results. SPY did show signs of benefiting from this strategy, but FXE, for example, did not. Depending on your objectives, if you are trading SPY only or want something consistent across more underlyings, these results may be useful or not in your trading. Either way, this exercise expanded the development to a point where entering and exiting strangles and calculating metrics has become easier. This result will allow me to continue writing posts and building this toolset into a robust backtesting system. Please read on for code snippets and summary plots.
+#### Results:  
+When choosing entry criteria of 45 DTE, 16 delta strangles, and closing at expiration waiting to enter until the pc ratio exceeds the trailing one yr mean or upper bound of SD did not have consistent results.  
+
+Several symbols did show signs of benefiting from this strategy, but FXE and GLD, for example, did not. 
+
+Depending on your objectives, if you are trading SPY only or want something consistent across more underlyings, these results may be useful or not in your trading. Either way, this exercise expanded the development to a point where entering and exiting strangles and calculating metrics has become easier. This result will allow us to continue writing posts that build the toolset into a robust backtesting system. Please read on for code snippets and summary plots.
 
 #### Setup global options, load libraries:
 
@@ -48,7 +44,7 @@ When choosing entry criteria of 45 DTE, 16 delta strangles, and closing at expir
 ```r
 knitr::opts_chunk$set(message = FALSE, tidy.opts = list(width.cutoff = 60)) 
 suppressWarnings(suppressMessages(suppressPackageStartupMessages({
-  library_list <- c("tidyverse", "tastytrade", "here", "htmlwidgets")
+  library_list <- c("tidyverse", "tastytrade", "here", "htmlwidgets", "TTR")
   lapply(library_list, require, character.only = TRUE)})))
 args <- expand.grid(symbol = c("SPY", "IWM", "GLD", "QQQ", "DIA",
                                "TLT","XLE", "EEM", "EWZ", "FXE"),
@@ -104,19 +100,18 @@ study <- function(stock, tar_dte, tar_delta_put, tar_delta_call) {
   
   dplyr::left_join(closed_puts, closed_calls, 
                    by = c("symbol", "quotedate", "expiration", "open_date",
-                          "open_stock_price")) 
+                          "open_stock_price"))
 }
 ```
 
 #### Run study  
 
-Using the purrr library to map the arguments list to our study function results in a dataframe of strangles to review
+Using the purrr library to map the arguments list to our function results in a dataframe of strangles for review
 
 
 ```r
 results <- purrr::pmap_dfr(list(args$symbol, args$tar_dte, args$tar_delta_put,
-                                args$tar_delta_call), study) 
-
+                                args$tar_delta_call), study)
 dplyr::glimpse(results)
 ```
 
@@ -140,7 +135,7 @@ dplyr::glimpse(results)
 
 #### Calculate metrics  
 
-Using the results at expiration from the strangle trades we now can calculate additional metrics to be reviewed.
+Using the results at expiration from the strangle trades we can now calculate additional metrics.
 
 * Put/Call ratio based on delta
 * Profit
@@ -174,6 +169,7 @@ result_metrics <- results %>%
                 above_upper = ifelse(pc_ratio > upper, 1, 0),
                 above_run_mean = ifelse(pc_ratio > run_mean, 1, 0)) %>%
   dplyr::ungroup() %>%
+  dplyr::filter(complete.cases(.)) %>%
   dplyr::group_by(symbol, above_upper, above_run_mean) %>%
   dplyr::mutate(mean_profit = mean(profit),
                 mean_roc = mean(roc),
@@ -184,51 +180,54 @@ result_metrics <- results %>%
   dplyr::select(symbol, open_date, pc_ratio, profitable, lower,
                 upper, above_upper, mean_profit_all, mean_profit, win_rate,
                 win_rate_all, above_run_mean, sd_profit, sd_profit_all, run_sd,
-                run_mean, mean_roc, mean_roc_all)
+                run_mean, mean_roc, mean_roc_all, profit) 
 
 dplyr::glimpse(result_metrics)
 ```
 
 ```
-## Observations: 14,838
-## Variables: 18
-## $ symbol          <chr> "SPY", "IWM", "GLD", "QQQ", "DIA", "TLT", "XLE...
-## $ open_date       <date> 2012-01-03, 2012-01-03, 2012-01-03, 2012-01-0...
-## $ pc_ratio        <dbl> 1.810897, 1.773478, 1.143696, 1.834532, 1.9315...
-## $ profitable      <dbl> 1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 1, 1...
-## $ lower           <dbl> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA...
-## $ upper           <dbl> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA...
-## $ above_upper     <dbl> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA...
-## $ mean_profit_all <dbl> 70.638907, 55.717083, 32.953249, 24.935122, 28...
-## $ mean_profit     <dbl> 92.665339, 55.575697, 116.930279, -3.916335, 8...
-## $ win_rate        <dbl> 0.8486056, 0.8047809, 0.9003984, 0.6414343, 0....
-## $ win_rate_all    <dbl> 0.8001332, 0.8372721, 0.8136605, 0.7459239, 0....
-## $ above_run_mean  <dbl> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA...
-## $ sd_profit       <dbl> 97.66448, 93.93827, 158.40609, 104.01994, 78.0...
-## $ sd_profit_all   <dbl> 179.16656, 169.40416, 237.67250, 129.24087, 21...
-## $ run_sd          <dbl> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA...
-## $ run_mean        <dbl> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA...
-## $ mean_roc        <dbl> 0.033499808, 0.034810827, 0.035774345, -0.0037...
-## $ mean_roc_all    <dbl> 0.019152915, 0.024684420, 0.012831337, 0.01058...
+## Observations: 12,328
+## Variables: 19
+## $ symbol          <chr> "FXE", "FXE", "QQQ", "DIA", "EWZ", "FXE", "GLD...
+## $ open_date       <date> 2013-01-04, 2013-01-07, 2013-01-08, 2013-01-0...
+## $ pc_ratio        <dbl> 1.137058, 1.181529, 1.572751, 1.572259, 1.3887...
+## $ profitable      <dbl> 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1...
+## $ lower           <dbl> 1.169539, 1.168711, 1.575033, 1.753458, 1.3552...
+## $ upper           <dbl> 1.429910, 1.429443, 1.840779, 1.989782, 1.7573...
+## $ above_upper     <dbl> 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0...
+## $ mean_profit_all <dbl> 21.059122, 21.059122, 24.935122, 28.015562, -2...
+## $ mean_profit     <dbl> 17.049202, 17.049202, 17.905882, -7.927289, -6...
+## $ win_rate        <dbl> 0.8470745, 0.8470745, 0.7193277, 0.6947935, 0....
+## $ win_rate_all    <dbl> 0.8398649, 0.8398649, 0.7459239, 0.7726658, 0....
+## $ above_run_mean  <dbl> 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0...
+## $ sd_profit       <dbl> 108.31971, 108.31971, 137.10834, 248.26268, 15...
+## $ sd_profit_all   <dbl> 104.56038, 104.56038, 129.24087, 213.16981, 14...
+## $ run_sd          <dbl> 0.13018526, 0.13036643, 0.13287298, 0.11816170...
+## $ run_mean        <dbl> 1.299724, 1.299077, 1.707906, 1.871620, 1.5562...
+## $ mean_roc        <dbl> 0.00760283055, 0.00760283055, 0.00805730658, 0...
+## $ mean_roc_all    <dbl> 0.008908117, 0.008908117, 0.010589440, 0.01035...
+## $ profit          <dbl> 52.0000001, 58.9999990, 53.9999997, -147.99999...
 ```
 
 #### Plot the standard deviation of pc ratio bands  
 
-Using the upper band of the standard deviation for pc ratio as entry criteria gives a higher entry requirement and is more selective. This plot shows that band for the SPY, and later we will see how trading only those entries performs against all days above the mean value. At this point, we have quite a few rows with NA values due to the trailing one yr mean and sd. These will subsequently be removed because trades would not have been opened without this data. This ribbon plot shows this missing data in the first year on the left.
+Using the upper band of the standard deviation for pc ratio as entry criteria gives a higher entry requirement and is more selective. This plot shows that band for the SPY, and later we will see how trading only those entries performs against all days above the mean value.
 
 
 ```r
-spy <- dplyr::filter(result_metrics, symbol == "SPY")
-ggplot(data = spy, aes(x = open_date, y = pc_ratio)) +
+dplyr::filter(result_metrics, symbol == "SPY") %>%
+  ggplot(., aes(x = open_date, y = pc_ratio)) +
   geom_point(size = 0.35, aes(colour = factor(profitable))) +
   geom_ribbon(aes(ymin = lower, ymax = upper, x = open_date, 
-                  fill = "sd band"), alpha = 0.2) +
+                  fill = "1 Standard Deviation"), alpha = 0.2) +
   scale_fill_manual("",values = "grey12") + 
   theme_minimal() +
+  ylab("Put Call Ratio") + 
+  xlab("Trade Open Date") +
   ggtitle("1 Yr Standard Deviation PC Ratio Ribbon")
 ```
 
-<img src="/post/2018-08-07-put-richness_files/figure-html/sd ribbon plot-1.png" width="672" />
+<img src="/post/2018-08-13-put-richness_files/figure-html/sd ribbon plot-1.png" width="672" />
 
 #### Metrics calculations  
 
@@ -284,32 +283,38 @@ formatted_metrics <- metrics %>%
                 sd_profit_above_run_mean = scales::dollar(sd_profit_above_run_mean))
 ```
 
-#### Mean PnL 
+#### Mean and Standard Deviation PnL
 
 
 ```r
 dplyr::select(formatted_metrics, 
               c(symbol, mean_profit_all, mean_profit_above_upper, 
-                mean_profit_above_run_mean)) %>%
+                mean_profit_above_run_mean, sd_profit_all, sd_profit_above_upper,
+                sd_profit_above_run_mean)) %>%
   knitr::kable(., digits = 2, format = "html", 
-               caption = "Mean PnL for selling strangles based on Put-Call Ratio",
-               col.names = c("SYM", "ALL", "ABOVE UPPER", "ABOVE RUN MEAN"),
+               caption = "Mean & SD PnL for selling strangles based on Put-Call Ratio",
+               col.names = c("SYM", "ALL", "ABOVE UPPER", "ABOVE RUN MEAN",
+                             "ALL", "ABOVE UPPER", "ABOVE RUN MEAN"),
                escape = FALSE, 
-               align = c('l', 'r', 'r', 'r')) %>%
+               align = c('l', 'r', 'r', 'r', 'r', 'r', 'r')) %>%
   kableExtra::kable_styling(bootstrap_options = "striped", full_width = FALSE) %>%
-  kableExtra::add_header_above(., c(" ", "MEAN PnL" = 3)) %>%
-  kableExtra::column_spec(., 1:4, width = "0.5in")
+  kableExtra::add_header_above(., c(" ", "MEAN PnL" = 3, "SD PnL" = 3)) %>%
+  kableExtra::column_spec(., 1:7, width = "0.5in")
 ```
 
 <table class="table table-striped" style="width: auto !important; margin-left: auto; margin-right: auto;">
-<caption>Table 1 Mean PnL for selling strangles based on Put-Call Ratio</caption>
+<caption>(\#tab:Table 1)Mean &amp; SD PnL for selling strangles based on Put-Call Ratio</caption>
  <thead>
 <tr>
 <th style="border-bottom:hidden" colspan="1"></th>
 <th style="border-bottom:hidden; padding-bottom:0; padding-left:3px;padding-right:3px;text-align: center; " colspan="3"><div style="border-bottom: 1px solid #ddd; padding-bottom: 5px;">MEAN PnL</div></th>
+<th style="border-bottom:hidden; padding-bottom:0; padding-left:3px;padding-right:3px;text-align: center; " colspan="3"><div style="border-bottom: 1px solid #ddd; padding-bottom: 5px;">SD PnL</div></th>
 </tr>
   <tr>
    <th style="text-align:left;"> SYM </th>
+   <th style="text-align:right;"> ALL </th>
+   <th style="text-align:right;"> ABOVE UPPER </th>
+   <th style="text-align:right;"> ABOVE RUN MEAN </th>
    <th style="text-align:right;"> ALL </th>
    <th style="text-align:right;"> ABOVE UPPER </th>
    <th style="text-align:right;"> ABOVE RUN MEAN </th>
@@ -321,89 +326,126 @@ dplyr::select(formatted_metrics,
    <td style="text-align:right;width: 0.5in; "> $28.02 </td>
    <td style="text-align:right;width: 0.5in; "> $49.93 </td>
    <td style="text-align:right;width: 0.5in; "> $30.09 </td>
+   <td style="text-align:right;width: 0.5in; "> $213.17 </td>
+   <td style="text-align:right;width: 0.5in; "> $187.13 </td>
+   <td style="text-align:right;width: 0.5in; "> $221.45 </td>
   </tr>
   <tr>
    <td style="text-align:left;width: 0.5in; "> EEM </td>
    <td style="text-align:right;width: 0.5in; "> $21.64 </td>
    <td style="text-align:right;width: 0.5in; "> $31.07 </td>
    <td style="text-align:right;width: 0.5in; "> $18.83 </td>
+   <td style="text-align:right;width: 0.5in; "> $63.05 </td>
+   <td style="text-align:right;width: 0.5in; "> $37.21 </td>
+   <td style="text-align:right;width: 0.5in; "> $61.05 </td>
   </tr>
   <tr>
    <td style="text-align:left;width: 0.5in; "> EWZ </td>
    <td style="text-align:right;width: 0.5in; "> $-2.07 </td>
    <td style="text-align:right;width: 0.5in; "> $7.29 </td>
    <td style="text-align:right;width: 0.5in; "> $-9.21 </td>
+   <td style="text-align:right;width: 0.5in; "> $146.12 </td>
+   <td style="text-align:right;width: 0.5in; "> $116.54 </td>
+   <td style="text-align:right;width: 0.5in; "> $122.95 </td>
   </tr>
   <tr>
    <td style="text-align:left;width: 0.5in; "> FXE </td>
    <td style="text-align:right;width: 0.5in; "> $21.06 </td>
    <td style="text-align:right;width: 0.5in; "> $-2.44 </td>
    <td style="text-align:right;width: 0.5in; "> $23.97 </td>
+   <td style="text-align:right;width: 0.5in; "> $104.56 </td>
+   <td style="text-align:right;width: 0.5in; "> $119.56 </td>
+   <td style="text-align:right;width: 0.5in; "> $103.36 </td>
   </tr>
   <tr>
    <td style="text-align:left;width: 0.5in; "> GLD </td>
    <td style="text-align:right;width: 0.5in; "> $32.95 </td>
    <td style="text-align:right;width: 0.5in; "> $-41.70 </td>
    <td style="text-align:right;width: 0.5in; "> $35.85 </td>
+   <td style="text-align:right;width: 0.5in; "> $237.67 </td>
+   <td style="text-align:right;width: 0.5in; "> $359.85 </td>
+   <td style="text-align:right;width: 0.5in; "> $268.32 </td>
   </tr>
   <tr>
    <td style="text-align:left;width: 0.5in; "> IWM </td>
    <td style="text-align:right;width: 0.5in; "> $55.72 </td>
    <td style="text-align:right;width: 0.5in; "> $63.18 </td>
    <td style="text-align:right;width: 0.5in; "> $52.82 </td>
+   <td style="text-align:right;width: 0.5in; "> $169.40 </td>
+   <td style="text-align:right;width: 0.5in; "> $168.14 </td>
+   <td style="text-align:right;width: 0.5in; "> $167.11 </td>
   </tr>
   <tr>
    <td style="text-align:left;width: 0.5in; "> QQQ </td>
    <td style="text-align:right;width: 0.5in; "> $24.94 </td>
    <td style="text-align:right;width: 0.5in; "> $57.02 </td>
    <td style="text-align:right;width: 0.5in; "> $36.10 </td>
+   <td style="text-align:right;width: 0.5in; "> $129.24 </td>
+   <td style="text-align:right;width: 0.5in; "> $128.18 </td>
+   <td style="text-align:right;width: 0.5in; "> $127.60 </td>
   </tr>
   <tr>
    <td style="text-align:left;width: 0.5in; "> SPY </td>
    <td style="text-align:right;width: 0.5in; "> $70.64 </td>
    <td style="text-align:right;width: 0.5in; "> $82.51 </td>
    <td style="text-align:right;width: 0.5in; "> $55.26 </td>
+   <td style="text-align:right;width: 0.5in; "> $179.17 </td>
+   <td style="text-align:right;width: 0.5in; "> $172.64 </td>
+   <td style="text-align:right;width: 0.5in; "> $211.46 </td>
   </tr>
   <tr>
    <td style="text-align:left;width: 0.5in; "> TLT </td>
    <td style="text-align:right;width: 0.5in; "> $22.20 </td>
    <td style="text-align:right;width: 0.5in; "> $-5.61 </td>
    <td style="text-align:right;width: 0.5in; "> $17.31 </td>
+   <td style="text-align:right;width: 0.5in; "> $171.89 </td>
+   <td style="text-align:right;width: 0.5in; "> $241.76 </td>
+   <td style="text-align:right;width: 0.5in; "> $182.38 </td>
   </tr>
   <tr>
    <td style="text-align:left;width: 0.5in; "> XLE </td>
    <td style="text-align:right;width: 0.5in; "> $30.17 </td>
    <td style="text-align:right;width: 0.5in; "> $40.44 </td>
    <td style="text-align:right;width: 0.5in; "> $28.89 </td>
+   <td style="text-align:right;width: 0.5in; "> $131.24 </td>
+   <td style="text-align:right;width: 0.5in; "> $105.37 </td>
+   <td style="text-align:right;width: 0.5in; "> $147.90 </td>
   </tr>
 </tbody>
 </table>
 
-#### Win Rates 
+#### Win Rates and Return on Capital
 
 
 ```r
-dplyr::select(formatted_metrics, c(symbol, win_rate_all, win_rate_above_upper,
-                                   win_rate_above_run_mean)) %>%
+dplyr::select(formatted_metrics,
+              c(symbol, win_rate_all, win_rate_above_upper,
+                win_rate_above_run_mean, mean_roc_all, 
+                mean_roc_above_upper, mean_roc_above_run_mean)) %>%
   knitr::kable(., digits = 2, format = "html", 
-               caption = "Win Rates for selling strangles based on Put-Call Ratio",
-               col.names = c("SYM", "ALL", "ABOVE UPPER", "ABOVE RUN MEAN"),
+               caption = "Win Rates & ROC for selling strangles based on Put-Call Ratio",
+               col.names = c("SYM", "ALL", "ABOVE UPPER", "ABOVE RUN MEAN",
+                             "ALL", "ABOVE UPPER", "ABOVE RUN MEAN"),
                escape = FALSE, 
-               align = c('l', 'r', 'r', 'r')) %>%
+               align = c('l', 'r', 'r', 'r', 'r', 'r', 'r')) %>%
   kableExtra::kable_styling(bootstrap_options = "striped", full_width = FALSE) %>%
-  kableExtra::add_header_above(., c(" ", "Win Rate" = 3)) %>%
-  kableExtra::column_spec(., 1:4, width = "0.5in")
+  kableExtra::add_header_above(., c(" ", "Win Rate" = 3, "ROC" = 3)) %>%
+  kableExtra::column_spec(., 1:7, width = "0.5in")
 ```
 
 <table class="table table-striped" style="width: auto !important; margin-left: auto; margin-right: auto;">
-<caption>Table 2 Win Rates for selling strangles based on Put-Call Ratio</caption>
+<caption>(\#tab:Table 2)Win Rates &amp; ROC for selling strangles based on Put-Call Ratio</caption>
  <thead>
 <tr>
 <th style="border-bottom:hidden" colspan="1"></th>
 <th style="border-bottom:hidden; padding-bottom:0; padding-left:3px;padding-right:3px;text-align: center; " colspan="3"><div style="border-bottom: 1px solid #ddd; padding-bottom: 5px;">Win Rate</div></th>
+<th style="border-bottom:hidden; padding-bottom:0; padding-left:3px;padding-right:3px;text-align: center; " colspan="3"><div style="border-bottom: 1px solid #ddd; padding-bottom: 5px;">ROC</div></th>
 </tr>
   <tr>
    <th style="text-align:left;"> SYM </th>
+   <th style="text-align:right;"> ALL </th>
+   <th style="text-align:right;"> ABOVE UPPER </th>
+   <th style="text-align:right;"> ABOVE RUN MEAN </th>
    <th style="text-align:right;"> ALL </th>
    <th style="text-align:right;"> ABOVE UPPER </th>
    <th style="text-align:right;"> ABOVE RUN MEAN </th>
@@ -415,229 +457,95 @@ dplyr::select(formatted_metrics, c(symbol, win_rate_all, win_rate_above_upper,
    <td style="text-align:right;width: 0.5in; "> 77.3% </td>
    <td style="text-align:right;width: 0.5in; "> 84.1% </td>
    <td style="text-align:right;width: 0.5in; "> 77.8% </td>
+   <td style="text-align:right;width: 0.5in; "> 1.04% </td>
+   <td style="text-align:right;width: 0.5in; "> 1.36% </td>
+   <td style="text-align:right;width: 0.5in; "> 0.88% </td>
   </tr>
   <tr>
    <td style="text-align:left;width: 0.5in; "> EEM </td>
    <td style="text-align:right;width: 0.5in; "> 84.8% </td>
    <td style="text-align:right;width: 0.5in; "> 90.1% </td>
    <td style="text-align:right;width: 0.5in; "> 83.9% </td>
+   <td style="text-align:right;width: 0.5in; "> 2.66% </td>
+   <td style="text-align:right;width: 0.5in; "> 4.08% </td>
+   <td style="text-align:right;width: 0.5in; "> 2.22% </td>
   </tr>
   <tr>
    <td style="text-align:left;width: 0.5in; "> EWZ </td>
    <td style="text-align:right;width: 0.5in; "> 74.7% </td>
    <td style="text-align:right;width: 0.5in; "> 73.8% </td>
    <td style="text-align:right;width: 0.5in; "> 70.6% </td>
+   <td style="text-align:right;width: 0.5in; "> -0.61% </td>
+   <td style="text-align:right;width: 0.5in; "> 1.42% </td>
+   <td style="text-align:right;width: 0.5in; "> -1.54% </td>
   </tr>
   <tr>
    <td style="text-align:left;width: 0.5in; "> FXE </td>
    <td style="text-align:right;width: 0.5in; "> 84.0% </td>
    <td style="text-align:right;width: 0.5in; "> 69.4% </td>
    <td style="text-align:right;width: 0.5in; "> 87.0% </td>
+   <td style="text-align:right;width: 0.5in; "> 0.89% </td>
+   <td style="text-align:right;width: 0.5in; "> -0.06% </td>
+   <td style="text-align:right;width: 0.5in; "> 1.04% </td>
   </tr>
   <tr>
    <td style="text-align:left;width: 0.5in; "> GLD </td>
    <td style="text-align:right;width: 0.5in; "> 81.4% </td>
    <td style="text-align:right;width: 0.5in; "> 75.1% </td>
    <td style="text-align:right;width: 0.5in; "> 82.7% </td>
+   <td style="text-align:right;width: 0.5in; "> 1.28% </td>
+   <td style="text-align:right;width: 0.5in; "> -0.93% </td>
+   <td style="text-align:right;width: 0.5in; "> 1.88% </td>
   </tr>
   <tr>
    <td style="text-align:left;width: 0.5in; "> IWM </td>
    <td style="text-align:right;width: 0.5in; "> 83.7% </td>
    <td style="text-align:right;width: 0.5in; "> 84.7% </td>
    <td style="text-align:right;width: 0.5in; "> 82.1% </td>
+   <td style="text-align:right;width: 0.5in; "> 2.47% </td>
+   <td style="text-align:right;width: 0.5in; "> 2.78% </td>
+   <td style="text-align:right;width: 0.5in; "> 2.24% </td>
   </tr>
   <tr>
    <td style="text-align:left;width: 0.5in; "> QQQ </td>
    <td style="text-align:right;width: 0.5in; "> 74.6% </td>
    <td style="text-align:right;width: 0.5in; "> 88.7% </td>
    <td style="text-align:right;width: 0.5in; "> 77.5% </td>
+   <td style="text-align:right;width: 0.5in; "> 1.06% </td>
+   <td style="text-align:right;width: 0.5in; "> 2.47% </td>
+   <td style="text-align:right;width: 0.5in; "> 1.57% </td>
   </tr>
   <tr>
    <td style="text-align:left;width: 0.5in; "> SPY </td>
    <td style="text-align:right;width: 0.5in; "> 80.0% </td>
    <td style="text-align:right;width: 0.5in; "> 81.9% </td>
    <td style="text-align:right;width: 0.5in; "> 77.5% </td>
+   <td style="text-align:right;width: 0.5in; "> 1.92% </td>
+   <td style="text-align:right;width: 0.5in; "> 2.12% </td>
+   <td style="text-align:right;width: 0.5in; "> 1.48% </td>
   </tr>
   <tr>
    <td style="text-align:left;width: 0.5in; "> TLT </td>
    <td style="text-align:right;width: 0.5in; "> 81.8% </td>
    <td style="text-align:right;width: 0.5in; "> 83.1% </td>
    <td style="text-align:right;width: 0.5in; "> 84.2% </td>
+   <td style="text-align:right;width: 0.5in; "> 0.97% </td>
+   <td style="text-align:right;width: 0.5in; "> 0.18% </td>
+   <td style="text-align:right;width: 0.5in; "> 0.86% </td>
   </tr>
   <tr>
    <td style="text-align:left;width: 0.5in; "> XLE </td>
    <td style="text-align:right;width: 0.5in; "> 82.5% </td>
    <td style="text-align:right;width: 0.5in; "> 83.2% </td>
    <td style="text-align:right;width: 0.5in; "> 82.3% </td>
+   <td style="text-align:right;width: 0.5in; "> 2.15% </td>
+   <td style="text-align:right;width: 0.5in; "> 2.68% </td>
+   <td style="text-align:right;width: 0.5in; "> 2.22% </td>
   </tr>
 </tbody>
 </table>
 
-#### Standard Deviation PnL 
+*If you have suggestions for studies, improvements for rstats code, or any other feedback please reach out with the contact links on the sidebar*
 
-
-```r
-dplyr::select(formatted_metrics, 
-              c(symbol, sd_profit_all, sd_profit_above_upper,
-                sd_profit_above_run_mean)) %>%
-  knitr::kable(., digits = 2, format = "html", 
-               caption = "Standard Deviation PnL for selling strangles based on Put-Call Ratio",
-               col.names = c("SYM", "ALL", "ABOVE UPPER", "ABOVE RUN MEAN"),
-               escape = FALSE, 
-               align = c('l', 'r', 'r', 'r')) %>%
-  kableExtra::kable_styling(bootstrap_options = "striped", full_width = FALSE) %>%
-  kableExtra::add_header_above(., c(" ", "SD PnL" = 3)) %>%
-  kableExtra::column_spec(., 1:4, width = "0.5in")
-```
-
-<table class="table table-striped" style="width: auto !important; margin-left: auto; margin-right: auto;">
-<caption>Table 3 Standard Deviation PnL for selling strangles based on Put-Call Ratio</caption>
- <thead>
-<tr>
-<th style="border-bottom:hidden" colspan="1"></th>
-<th style="border-bottom:hidden; padding-bottom:0; padding-left:3px;padding-right:3px;text-align: center; " colspan="3"><div style="border-bottom: 1px solid #ddd; padding-bottom: 5px;">SD PnL</div></th>
-</tr>
-  <tr>
-   <th style="text-align:left;"> SYM </th>
-   <th style="text-align:right;"> ALL </th>
-   <th style="text-align:right;"> ABOVE UPPER </th>
-   <th style="text-align:right;"> ABOVE RUN MEAN </th>
-  </tr>
- </thead>
-<tbody>
-  <tr>
-   <td style="text-align:left;width: 0.5in; "> DIA </td>
-   <td style="text-align:right;width: 0.5in; "> $213.17 </td>
-   <td style="text-align:right;width: 0.5in; "> $187.13 </td>
-   <td style="text-align:right;width: 0.5in; "> $221.45 </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;width: 0.5in; "> EEM </td>
-   <td style="text-align:right;width: 0.5in; "> $63.05 </td>
-   <td style="text-align:right;width: 0.5in; "> $37.21 </td>
-   <td style="text-align:right;width: 0.5in; "> $61.05 </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;width: 0.5in; "> EWZ </td>
-   <td style="text-align:right;width: 0.5in; "> $146.12 </td>
-   <td style="text-align:right;width: 0.5in; "> $116.54 </td>
-   <td style="text-align:right;width: 0.5in; "> $122.95 </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;width: 0.5in; "> FXE </td>
-   <td style="text-align:right;width: 0.5in; "> $104.56 </td>
-   <td style="text-align:right;width: 0.5in; "> $119.56 </td>
-   <td style="text-align:right;width: 0.5in; "> $103.36 </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;width: 0.5in; "> GLD </td>
-   <td style="text-align:right;width: 0.5in; "> $237.67 </td>
-   <td style="text-align:right;width: 0.5in; "> $359.85 </td>
-   <td style="text-align:right;width: 0.5in; "> $268.32 </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;width: 0.5in; "> IWM </td>
-   <td style="text-align:right;width: 0.5in; "> $169.40 </td>
-   <td style="text-align:right;width: 0.5in; "> $168.14 </td>
-   <td style="text-align:right;width: 0.5in; "> $167.11 </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;width: 0.5in; "> QQQ </td>
-   <td style="text-align:right;width: 0.5in; "> $129.24 </td>
-   <td style="text-align:right;width: 0.5in; "> $128.18 </td>
-   <td style="text-align:right;width: 0.5in; "> $127.60 </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;width: 0.5in; "> SPY </td>
-   <td style="text-align:right;width: 0.5in; "> $179.17 </td>
-   <td style="text-align:right;width: 0.5in; "> $172.64 </td>
-   <td style="text-align:right;width: 0.5in; "> $211.46 </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;width: 0.5in; "> TLT </td>
-   <td style="text-align:right;width: 0.5in; "> $171.89 </td>
-   <td style="text-align:right;width: 0.5in; "> $241.76 </td>
-   <td style="text-align:right;width: 0.5in; "> $182.38 </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;width: 0.5in; "> XLE </td>
-   <td style="text-align:right;width: 0.5in; "> $131.24 </td>
-   <td style="text-align:right;width: 0.5in; "> $105.37 </td>
-   <td style="text-align:right;width: 0.5in; "> $147.90 </td>
-  </tr>
-</tbody>
-</table>
-
-#### Mean Profit by split
-
-
-```r
-dplyr::select(metrics, 
-              c(symbol, mean_profit_all, mean_profit_above_upper,
-                mean_profit_above_run_mean)) %>%
-  tidyr::gather(., Metric, Value, -symbol) %>%
-  ggplot(., aes(Metric, Value, fill = symbol)) + 
-  geom_col(position = "dodge") +
-  theme_minimal() +
-  ylab("Mean Profit") + 
-  xlab("Metric") +
-  ggtitle("Mean Profit split by mean, upper band sd, and all trades")
-```
-
-<img src="/post/2018-08-07-put-richness_files/figure-html/unnamed-chunk-4-1.png" width="672" />
-
-#### Win Percentages by split
-
-
-```r
-dplyr::select(metrics, 
-              c(symbol, win_rate_all, win_rate_above_upper,
-                win_rate_above_run_mean)) %>%
-  tidyr::gather(., Metric, Value, -symbol) %>%
-  dplyr::mutate(Value = Value * 100) %>%
-  ggplot(., aes(Metric, Value, fill = symbol)) + 
-  geom_col(position = "dodge") + 
-  scale_y_continuous("Win Rate", breaks = seq(55, 95, by = 10)) +
-  coord_cartesian(ylim = c(55, 95)) +
-  theme_minimal() + 
-  xlab("Metric")  +
-  ggtitle("Win percentages split by mean, upper band sd, and all trades")
-```
-
-<img src="/post/2018-08-07-put-richness_files/figure-html/unnamed-chunk-5-1.png" width="672" />
-
-#### Mean Standard Deviation of profit by split
-
-
-```r
-dplyr::select(metrics, 
-              c(symbol, sd_profit_all, sd_profit_above_upper,
-                sd_profit_above_run_mean)) %>%
-  tidyr::gather(., Metric, Value, -symbol) %>%
-  ggplot(., aes(Metric, Value, fill = symbol)) + 
-  geom_col( position = "dodge") +
-  theme_minimal() +
-  ylab("Mean SD Profit") + 
-  xlab("Metric") +
-  ggtitle("SD Mean Profit split by mean, upper band sd, and all trades")
-```
-
-<img src="/post/2018-08-07-put-richness_files/figure-html/unnamed-chunk-6-1.png" width="672" />
-
-#### Mean ROC by split
-
-
-```r
-dplyr::select(metrics, 
-              c(symbol, mean_roc_all, mean_roc_above_upper,
-                mean_roc_above_run_mean)) %>%
-  tidyr::gather(., Metric, Value, -symbol) %>%
-  ggplot(., aes(Metric, Value, fill = symbol)) + 
-  geom_col( position = "dodge") +
-  theme_minimal() +
-  ylab("Mean ROC") + 
-  xlab("Metric") +
-  ggtitle("Return on Capital split by mean, upper band sd, and all trades")
-```
-
-<img src="/post/2018-08-07-put-richness_files/figure-html/unnamed-chunk-7-1.png" width="672" />
+#### Best,
+#### Jason
