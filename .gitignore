@@ -8,5 +8,4 @@ blogdown
 *.RProj
 .Rprofile
 .httr-oauth
-staging
 working
