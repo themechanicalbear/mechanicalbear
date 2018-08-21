@@ -15,8 +15,16 @@ topics: [first post, news]
 ---
 
 ## Goals & Objectives  
-I have been an options trader and follower of tastytrade research and methods since 2012. For the past few years I have been backtesting trading ideas to learn investment strategies and improve my skills in rstats and data analysis. This blog will chronicle those interests and developments.  
+I have been an options trader and follower of tastytrade research and methods since 2012. For the past few years, I have backtested trading ideas to learn investment strategies and improve my skills in rstats and data analysis. This blog will chronicle those interests and developments. 
+
 <!--more-->
+
+As a student of tastytrade, I've learned how to sell premium in highly liquid underlyings with elevated volatility. If you have been lucky enough to follow their data science team's *Market Measures* content you should be able to follow along with this blog nicely. If this is new to you, or are here more for the #rstats, that is great too, welcome! 
+
+I lead a weekly investment club at my work where we discuss options trading strategies and use tastytrade research as an education tool. Our group often has questions about what would happen if a 'Market Measure' was extended to include more underlyings or if multiple segments or ideas were combined. As I build out my #rstats code to make these tests easier, we will attempt to answer some of those questions. The research contained on this blog is meant to be educational and should not be used as trading advice or in any way as criticism of the tastytrade research it's based on. The changes to those studies always begin with sincere appreciation and lead us toward greater understanding, and learning.
+
+So what content can you expect?...
+
 ## Posts types:
 
 #### * Function and package development with #rstats. This includes the tasytrade package on [github](https://github.com/themechanicalbear/tastytrade)  
@@ -32,28 +40,28 @@ open_short <- function(data, tar_delta, put_call) {
   s <- paste0(put_call, "_strike")
   ds <- paste0(put_call, "_delta_strike")
   oc <- paste0(put_call, "_open_credit")
-
+  
   data %>%
-    dplyr::filter(type == put_call) %>%
-    dplyr::mutate(abs_delta = abs(delta_strike - tar_delta)) %>%
-    dplyr::group_by(quotedate) %>%
-    dplyr::filter(m_dte == min(m_dte, na.rm = TRUE)) %>%
-    dplyr::filter(abs_delta == min(abs_delta, na.rm = TRUE)) %>%
-    dplyr::ungroup() %>%
-    dplyr::collect() %>%
-    dplyr::mutate(!!tp := type,
-                  !!s := strike,
-                  !!ds := delta_strike,
-                  !!oc := mid,
-                  quotedate = as.Date(quotedate, origin = "1970-01-01"),
-                  expiration = as.Date(expiration, origin = "1970-01-01")) %>%
-    dplyr::select(symbol, quotedate, !!tp, expiration, !!s, !!ds, dte, !!oc)
+    filter(type == put_call) %>%
+    mutate(abs_delta = abs(delta_strike - tar_delta)) %>%
+    group_by(quotedate) %>%
+    filter(m_dte == min(m_dte, na.rm = TRUE)) %>%
+    filter(abs_delta == min(abs_delta, na.rm = TRUE)) %>%
+    ungroup() %>%
+    collect() %>%
+    mutate(!!tp := type,
+           !!s := strike,
+           !!ds := delta_strike,
+           !!oc := mid,
+           quotedate = as.Date(quotedate, origin = "1970-01-01"),
+           expiration = as.Date(expiration, origin = "1970-01-01")) %>%
+    select(symbol, quotedate, !!tp, expiration, !!s, !!ds, dte, !!oc)
 }
 ```
 
 #### * AWS related code: S3, redshift, connections  
 
-Example: This function takes in connection, credential, and format details to copy data from S3 in csv format into a redshift table  
+Example: This function takes in connection, credential, and format details to copy data from S3 in CSV format into a redshift table  
 
 ```{r}
 #' @export
@@ -81,11 +89,11 @@ copy_S3_redshift <-
 
 #### * Recreation of tastytrade *Market Measure* research  
 
-Each weekday the tastytrade research team delivers a backtesting study. These studies provide a wealth of research ideas and opportunities to learn. Posts of this type will be recreations of *Market Measure* research with the data I have available. I hope to add more stocks expand the entry and exit criteria and experiment with new visuals as I learn them.  
+Each weekday the tastytrade research team delivers a backtesting study. These studies provide a wealth of research ideas and opportunities to learn. Posts of this type will be recreations of *Market Measure* research with the data I have available. I hope to add more stocks to expand the entry and exit criteria and experiment with new visuals as I learn them.  
 
 #### * Original trading strategy research  
 
-When I have original research ideas I will include posts on those which will act as an original *Market Measure*. These can also include creation of technical indicators, downloading data from the web, and others.
+Original research ideas will include posts which will act as an original *Market Measure*. These can also add the creation of technical indicators, downloading data from the web, and others.
 
 *If you have suggestions for studies, improvements for rstats code, or any other feedback please reach out with the contact links on the sidebar*
 
