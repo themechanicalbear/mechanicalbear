@@ -1,5 +1,5 @@
 baseurl = "/" # Make sure to end baseurl with a '/'
-title = "Jason Taylor"
+title = "R • Options Analysis • tastytrade"
 #author = "Jason Taylor"
 # Shown in the side menu
 copyright = "&copy; 2018. All rights reserved."
@@ -15,7 +15,7 @@ theme = "blackburn"
 
 [params]
   # Shown in the home page
-  subtitle = "R • Options Analysis • tastytrade"
+  subtitle = "Jason Taylor"
   brand = "![Test](/img/metallic_logo.png)"
   googleAnalytics = "Your Google Analytics tracking ID"
   #disqus = "Your Disqus shortname"
