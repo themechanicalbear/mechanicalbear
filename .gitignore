@@ -9,3 +9,4 @@ blogdown
 .Rprofile
 .httr-oauth
 working
+static/data
