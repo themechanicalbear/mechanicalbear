@@ -1,7 +1,7 @@
 ---
-title: 'Trade Stats - Aug 24, 2018'
+title: 'Trade Stats - Sep 4, 2018'
 author: Jason Taylor
-date: '2018-08-24'
+date: '2018-09-04'
 draft: FALSE
 slug: trade-tracking
 categories:
@@ -33,10 +33,10 @@ The #rstats for this post is on [GitHub](https://github.com/themechanicalbear/me
  </thead>
 <tbody>
   <tr>
-   <td style="text-align:right;width: 0.75in; "> $214.46 </td>
-   <td style="text-align:right;width: 0.75in; "> 10% </td>
+   <td style="text-align:right;width: 0.75in; "> $236.90 </td>
+   <td style="text-align:right;width: 0.75in; "> 11.1% </td>
    <td style="text-align:right;width: 0.75in; "> 100% </td>
-   <td style="text-align:right;width: 0.75in; "> $1,614.68 </td>
+   <td style="text-align:right;width: 0.75in; "> $1,389.84 </td>
    <td style="text-align:right;width: 0.75in; "> $2,135.52 </td>
   </tr>
 </tbody>
@@ -123,19 +123,7 @@ The #rstats for this post is on [GitHub](https://github.com/themechanicalbear/me
    <td style="text-align:right;width: 0.5in; "> - </td>
   </tr>
   <tr>
-   <td style="text-align:left;width: 1.0in; "> XOM </td>
-   <td style="text-align:left;width: 1.0in; "> Aug - 17 </td>
-   <td style="text-align:left;width: 1.0in; "> Sep-28 </td>
-   <td style="text-align:right;width: 0.5in; "> $0.23 </td>
-   <td style="text-align:right;width: 0.5in; "> - </td>
-   <td style="text-align:right;width: 0.5in; "> 76.5 </td>
-   <td style="text-align:right;width: 0.5in; "> 75.5 </td>
-   <td style="text-align:right;width: 0.5in; "> - </td>
-   <td style="text-align:right;width: 0.5in; "> - </td>
-   <td style="text-align:right;width: 0.5in; "> - </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;width: 1.0in; "> XOM </td>
+   <td style="text-align:left;width: 1.0in; "> X </td>
    <td style="text-align:left;width: 1.0in; "> Aug - 20 </td>
    <td style="text-align:left;width: 1.0in; "> Sep-28 </td>
    <td style="text-align:right;width: 0.5in; "> $0.26 </td>
@@ -157,18 +145,6 @@ The #rstats for this post is on [GitHub](https://github.com/themechanicalbear/me
    <td style="text-align:right;width: 0.5in; "> 13 </td>
    <td style="text-align:right;width: 0.5in; "> - </td>
    <td style="text-align:right;width: 0.5in; "> 12.965 </td>
-  </tr>
-  <tr>
-   <td style="text-align:left;width: 1.0in; "> MU </td>
-   <td style="text-align:left;width: 1.0in; "> Aug - 21 </td>
-   <td style="text-align:left;width: 1.0in; "> Sep-21 </td>
-   <td style="text-align:right;width: 0.5in; "> $0.32 </td>
-   <td style="text-align:right;width: 0.5in; "> - </td>
-   <td style="text-align:right;width: 0.5in; "> 47 </td>
-   <td style="text-align:right;width: 0.5in; "> 46 </td>
-   <td style="text-align:right;width: 0.5in; "> - </td>
-   <td style="text-align:right;width: 0.5in; "> - </td>
-   <td style="text-align:right;width: 0.5in; "> - </td>
   </tr>
   <tr>
    <td style="text-align:left;width: 1.0in; "> LVS </td>
@@ -272,6 +248,19 @@ The #rstats for this post is on [GitHub](https://github.com/themechanicalbear/me
    <td style="text-align:right;width: 1.0in; "> $1.79 </td>
   </tr>
   <tr>
+   <td style="text-align:left;width: 1.0in; "> XOM </td>
+   <td style="text-align:left;width: 1.0in; "> SPV </td>
+   <td style="text-align:left;width: 1.0in; "> Aug - 17 </td>
+   <td style="text-align:left;width: 1.0in; "> Aug-27 </td>
+   <td style="text-align:right;width: 1.0in; "> $0.23 </td>
+   <td style="text-align:right;width: 1.0in; "> $0.12 </td>
+   <td style="text-align:right;width: 1.0in; "> 42 </td>
+   <td style="text-align:right;width: 1.0in; "> 10 </td>
+   <td style="text-align:right;width: 1.0in; "> $8.72 </td>
+   <td style="text-align:right;width: 1.0in; "> 11.0% </td>
+   <td style="text-align:right;width: 1.0in; "> $0.87 </td>
+  </tr>
+  <tr>
    <td style="text-align:left;width: 1.0in; "> NFLX </td>
    <td style="text-align:left;width: 1.0in; "> SPV </td>
    <td style="text-align:left;width: 1.0in; "> Aug - 20 </td>
@@ -283,6 +272,19 @@ The #rstats for this post is on [GitHub](https://github.com/themechanicalbear/me
    <td style="text-align:right;width: 1.0in; "> $75.72 </td>
    <td style="text-align:right;width: 1.0in; "> 20.2% </td>
    <td style="text-align:right;width: 1.0in; "> $37.86 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;width: 1.0in; "> MU </td>
+   <td style="text-align:left;width: 1.0in; "> SPV </td>
+   <td style="text-align:left;width: 1.0in; "> Aug - 21 </td>
+   <td style="text-align:left;width: 1.0in; "> Aug-27 </td>
+   <td style="text-align:right;width: 1.0in; "> $0.32 </td>
+   <td style="text-align:right;width: 1.0in; "> $0.16 </td>
+   <td style="text-align:right;width: 1.0in; "> 31 </td>
+   <td style="text-align:right;width: 1.0in; "> 6 </td>
+   <td style="text-align:right;width: 1.0in; "> $13.72 </td>
+   <td style="text-align:right;width: 1.0in; "> 19.5% </td>
+   <td style="text-align:right;width: 1.0in; "> $2.29 </td>
   </tr>
 </tbody>
 </table>
@@ -334,8 +336,8 @@ The #rstats for this post is on [GitHub](https://github.com/themechanicalbear/me
    <td style="text-align:left;width: 0.5in; "> MU </td>
    <td style="text-align:right;width: 0.25in; "> 0.00 </td>
    <td style="text-align:right;width: 0.25in; "> 0 </td>
-   <td style="text-align:right;width: 0.25in; "> 0.00 </td>
-   <td style="text-align:right;width: 0.25in; font-weight: bold;font-style: italic;color: #5CACEE;"> 0.00 </td>
+   <td style="text-align:right;width: 0.25in; "> 13.72 </td>
+   <td style="text-align:right;width: 0.25in; font-weight: bold;font-style: italic;color: #5CACEE;"> 13.72 </td>
   </tr>
   <tr>
    <td style="text-align:left;width: 0.5in; "> NFLX </td>
@@ -373,18 +375,25 @@ The #rstats for this post is on [GitHub](https://github.com/themechanicalbear/me
    <td style="text-align:right;width: 0.25in; font-weight: bold;font-style: italic;color: #5CACEE;"> 0.00 </td>
   </tr>
   <tr>
-   <td style="text-align:left;width: 0.5in; "> XOM </td>
+   <td style="text-align:left;width: 0.5in; "> X </td>
    <td style="text-align:right;width: 0.25in; "> 0.00 </td>
    <td style="text-align:right;width: 0.25in; "> 0 </td>
    <td style="text-align:right;width: 0.25in; "> 0.00 </td>
    <td style="text-align:right;width: 0.25in; font-weight: bold;font-style: italic;color: #5CACEE;"> 0.00 </td>
   </tr>
   <tr>
+   <td style="text-align:left;width: 0.5in; "> XOM </td>
+   <td style="text-align:right;width: 0.25in; "> 0.00 </td>
+   <td style="text-align:right;width: 0.25in; "> 0 </td>
+   <td style="text-align:right;width: 0.25in; "> 8.72 </td>
+   <td style="text-align:right;width: 0.25in; font-weight: bold;font-style: italic;color: #5CACEE;"> 8.72 </td>
+  </tr>
+  <tr>
    <td style="text-align:left;width: 0.5in; font-weight: bold;font-style: italic;color: #5CACEE;"> Total </td>
    <td style="text-align:right;width: 0.25in; font-weight: bold;font-style: italic;color: #5CACEE;"> 14.86 </td>
    <td style="text-align:right;width: 0.25in; font-weight: bold;font-style: italic;color: #5CACEE;"> 0 </td>
-   <td style="text-align:right;width: 0.25in; font-weight: bold;font-style: italic;color: #5CACEE;"> 199.60 </td>
-   <td style="text-align:right;width: 0.25in; font-weight: bold;font-style: italic;color: #5CACEE;font-weight: bold;font-style: italic;color: #5CACEE;"> 214.46 </td>
+   <td style="text-align:right;width: 0.25in; font-weight: bold;font-style: italic;color: #5CACEE;"> 222.04 </td>
+   <td style="text-align:right;width: 0.25in; font-weight: bold;font-style: italic;color: #5CACEE;font-weight: bold;font-style: italic;color: #5CACEE;"> 236.90 </td>
   </tr>
 </tbody>
 </table>
