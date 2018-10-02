@@ -10,3 +10,5 @@ blogdown
 .httr-oauth
 working
 static/data
+r/*
+data/*
