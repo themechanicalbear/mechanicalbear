@@ -1,7 +1,7 @@
 ---
-title: 'Trade Stats - Sep 4, 2018'
+title: 'Trade Stats - Oct 2, 2018'
 author: Jason Taylor
-date: '2018-09-04'
+date: '2018-10-02'
 draft: FALSE
 slug: trade-tracking
 categories:
@@ -19,7 +19,7 @@ The #rstats for this post is on [GitHub](https://github.com/themechanicalbear/me
 <!--more-->
 
 ```{r run, include = FALSE, results = FALSE, echo = FALSE}
-knitr::opts_chunk$set(message = FALSE, tidy.opts = list(width.cutoff = 60))
+knitr::opts_chunk$set(message = FALSE, tidy.opts = list(width.cutoff = 80))
 suppressWarnings(suppressMessages(suppressPackageStartupMessages({
   library_list <- c("tidyverse", "googlesheets", "knitr",
                     "kableExtra", "lubridate", "quantmod", 
@@ -46,22 +46,25 @@ tracking <- gs_title("Trade and Portfolio Tracking - Blog") %>%
           )) %>%
   mutate(open_dte = as.numeric(expiration - entry_date),
          days_held = as.numeric(exit_date - entry_date), 
-         num_legs = ifelse(strategy == "short_put_vertical", 2,
-                           ifelse(strategy == "long_VXX_put", 1, 
-                                  ifelse(strategy == "covered_call", 1, 0))),
+         num_legs = case_when(
+           strategy %in% c("covered_call", "short_put", "long_VXX_put") ~ 1,
+           strategy == "short_put_vertical" ~ 2,
+           strategy == "iron_condor" ~ 4,
+           TRUE ~ 0),
          total_credit = credit * contracts * 100,
          total_debit = debit * contracts * 100,
          fees = contracts * num_legs * 1.14,
-         max_profit = ifelse(strategy == "short_put_vertical", 
-                             total_credit - fees,
-                             ifelse(strategy == "long_VXX_put", "Inf", 
-                                    ifelse(strategy == "covered_call", 
-                                           total_credit - fees, 0))), 
+         max_profit = case_when(
+           strategy %in% c("short_put", "short_put_vertical", "iron_condor") ~ total_credit - fees,
+           #strategy == "long_VXX_put" ~ "Inf",
+           strategy == "covered_call" ~ total_credit - fees,
+           TRUE ~ 0),
          max_loss = case_when(
-           strategy == "short_put_vertical" ~ 
-             (contracts * 100 * (short_put - long_put)) - total_credit + fees,
            strategy == "long_VXX_put" ~ total_debit + fees,
-           strategy == "covered_call" ~ 100 * (stock - credit),
+           strategy == "covered_call" ~ (100 * (stock - credit)) + fees,
+           strategy %in% c("short_put_vertical", "iron_condor") ~ 
+             (100 * (short_put - long_put)) - max_profit + fees,
+           strategy == "short_put" ~ (short_put - credit) * 100 + fees,
            TRUE ~ 0),
          profit = ifelse(still_open == 0, total_credit - total_debit - fees, NA),
          roc = profit / max_loss,
@@ -74,8 +77,12 @@ results_table <- tracking %>%
   spread(strategy, total_profit) %>%
   replace_na(list(covered_call = 0, 
                   long_VXX_put = 0,
-                  short_put_vertical = 0)) %>%
-  mutate(sum1 = covered_call + long_VXX_put + short_put_vertical) %>%
+                  short_put_vertical = 0,
+                  short_put = 0,
+                  iron_condor = 0,
+                  strangle = 0)) %>%
+  mutate(sum1 = covered_call + long_VXX_put + short_put_vertical + short_put
+         + iron_condor + strangle) %>%
   janitor::adorn_totals("row")  
 
 cum_returns <- tracking %>%
@@ -89,8 +96,9 @@ cum_returns <- tracking %>%
 
 margin <- tracking %>%
   mutate(margin = case_when(
-    strategy == "covered_call" ~ (stock - credit) * 20,
-    strategy %in% c("short_put_vertical", "long_VXX_put")  ~ max_loss,
+    strategy %in% c("covered_call") ~ (stock - credit) * 20,
+    strategy %in% c("short_put_vertical", "long_VXX_put", "iron_condor")  ~ max_loss,
+    strategy == "short_put" ~ short_put * 20,
     TRUE ~ 0)) %>%
   select(entry_date, exit_date, symbol, margin) %>%
   replace_na(list(exit_date = ymd(today()))) 
@@ -233,6 +241,7 @@ closed_positions <- tracking %>%
     strategy == "covered_call" ~ "CC",
     strategy == "short_put_vertical" ~ "SPV",
     strategy == "long_VXX_put" ~ "LVXXP",
+    strategy == "short_put" ~ "SP",
     TRUE ~ "Other")) %>%
   select(c("symbol", "strategy", "entry_date", "exit_date", "credit", "debit", 
            "open_dte", "days_held", "profit", "roc", "pnl_day"))
@@ -255,14 +264,14 @@ kable(closed_positions, digits = 2, format = "html",
 ```{r, include = TRUE, results = TRUE, echo = FALSE}
 kable(results_table, digits = 2, format = "html",
       caption = "Tracking Totals",
-      col.names = c("SYM", "Covered Call", "Long   VXX", 
-                    "Short Put Vertical", "Total   Profit"),
+      col.names = c("SYM", "Covered Call", "Iron Condor", "Long VXX", 
+                    "Short Put", "Short Put Vertical", "Strangle", "Total Profit"),
       escape = FALSE,
-      align = c("l", "r", "r", "r", "r")) %>%
+      align = c("l", "r", "r", "r", "r", "r", "r", "r")) %>%
   kable_styling(bootstrap_options = "striped", position = "center",
                 full_width = FALSE) %>%
-  column_spec(1, width = "0.5in") %>%
-  column_spec(2:5, width = "0.25in") %>%
+  column_spec(1, width = "0.25in") %>%
+  column_spec(2:7, width = "0.75in") %>%
   column_spec(ncol(results_table), bold = TRUE, italic = TRUE, 
               color = "#5CACEE") %>%
   row_spec(nrow(results_table), bold = TRUE, italic = TRUE, 
@@ -284,6 +293,7 @@ ggplot(cum_returns) +
 
 ggplot(run_margin) +
   geom_area(aes(x = entry_date, y = margin_use), fill = "steelblue2") + 
+  geom_hline(yintercept = mean(run_margin$margin_use)) +
   theme_minimal() +
   theme(plot.title = element_text(hjust = 0.5)) + 
   scale_y_continuous(labels = scales::dollar) +
@@ -318,219 +328,6 @@ ggplot(spy) +
   xlab("") +
   ylab("Return %") +
   ggtitle("Benchmark Return")
-```
-
-```{r print, fig.show = 'hide', include = FALSE, echo = FALSE, results = FALSE}
-knitr::opts_chunk$set(message = FALSE, tidy.opts = list(width.cutoff = 60))
-suppressWarnings(suppressMessages(suppressPackageStartupMessages({
-  library_list <- c("tidyverse", "googlesheets", "knitr",
-                    "kableExtra", "lubridate", "quantmod")
-  lapply(library_list, require, character.only = TRUE)})))
-
-tracking <- gs_title("Trade and Portfolio Tracking - Blog") %>%
-  gs_read(ws = "Trades", cell_cols("A:N"),
-          col_types = cols(
-            entry_date = col_date(format = "%m/%d/%Y"),
-            exit_date = col_date(format = "%m/%d/%Y"),
-            expiration = col_date(format = "%m/%d/%Y"),
-            symbol = col_character(),
-            strategy = col_character(),
-            contracts = col_integer(),
-            credit = col_double(),
-            debit = col_double(),
-            short_put = col_double(),
-            long_put = col_double(),
-            short_call = col_double(),
-            long_call = col_double(),
-            stock = col_double(),
-            still_open = col_integer()
-          )) %>%
-  mutate(open_dte = as.numeric(expiration - entry_date),
-         days_held = as.numeric(exit_date - entry_date), 
-         num_legs = ifelse(strategy == "short_put_vertical", 2,
-                           ifelse(strategy == "long_VXX_put", 1, 
-                                  ifelse(strategy == "covered_call", 1, 0))),
-         total_credit = credit * contracts * 100,
-         total_debit = debit * contracts * 100,
-         fees = contracts * num_legs * 1.14,
-         max_profit = ifelse(strategy == "short_put_vertical", 
-                             total_credit - fees,
-                             ifelse(strategy == "long_VXX_put", "Inf", 
-                                    ifelse(strategy == "covered_call", 
-                                           total_credit - fees, 0))), 
-         max_loss = ifelse(strategy == "short_put_vertical", 
-                           (contracts * 100 * (short_put - long_put)) - 
-                             total_credit + fees,
-                           ifelse(strategy == "long_VXX_put",
-                                  total_debit + fees, 0)),
-         profit = ifelse(still_open == 0, total_credit - total_debit - fees, NA),
-         roc = profit / max_loss,
-         pnl_day = profit / days_held)
-
-results_table <- tracking %>%
-  group_by(symbol, strategy) %>%
-  summarise(total_profit = sum(profit, na.rm = TRUE)) %>%
-  ungroup() %>%
-  spread(strategy, total_profit) %>%
-  replace_na(list(covered_call = 0, 
-                  long_VXX_put = 0,
-                  short_put_vertical = 0)) %>%
-  mutate(sum1 = covered_call + long_VXX_put + short_put_vertical) %>%
-  janitor::adorn_totals("row")  
-
-kable(results_table, digits = 2, format = "html",
-      caption = "Tracking totals",
-      col.names = c("SYM", "Covered Call", "Long VXX", 
-                    "Short Put Vertical", "Total Profit"),
-      escape = FALSE,
-      align = c("l", "r", "r", "r", "r")) %>%
-  kable_styling(bootstrap_options = "striped", position = "center",
-                full_width = FALSE) %>%
-  column_spec(1:5, width = "0.5in") %>%
-  column_spec(ncol(results_table), bold = TRUE, italic = TRUE, 
-              background = "steelblue2") %>%
-  row_spec(nrow(results_table), bold = TRUE, italic = TRUE, 
-           background = "steelblue2")
-
-cum_returns <- tracking %>%
-  arrange(exit_date) %>%
-  mutate(cum_profit = cumsum(profit)) %>%
-  distinct(exit_date, cum_profit) %>%
-  filter(complete.cases(.))
-
-ggplot(cum_returns) +
-  geom_area(aes(x = exit_date, y = cum_profit), fill = "steelblue2") + 
-  theme_minimal() +
-  theme(plot.title = element_text(hjust = 0.5)) + 
-  scale_y_continuous(labels = scales::dollar) +
-  xlab("") +
-  ylab("Total Profit") +
-  ggtitle("Total Portfolio Profits")
-
-margin <- tracking %>%
-  mutate(margin = case_when(
-    strategy == "covered_call" ~ (stock - credit) * 20,
-    strategy %in% c("short_put_vertical", "long_VXX_put")  ~ max_loss,
-    TRUE ~ 0)) %>%
-  select(entry_date, exit_date, symbol, margin) %>%
-  replace_na(list(exit_date = ymd(today()))) 
-
-margin_ts <- function(st, en, sy, marg) {
-  data.frame(
-    entry_date = seq(ymd(st), ymd(en), by = "day"),
-    exit_date = ymd(en),
-    symbol = sy,
-    margin = marg
-  )
-}
-
-run_margin <-
-  pmap_dfr(list(as.character(margin$entry_date), 
-                as.character(margin$exit_date), 
-                margin$symbol, margin$margin), 
-           margin_ts) %>%
-  group_by(entry_date) %>%
-  summarise(margin_use = sum(margin, na.rm = TRUE))
-
-ggplot(run_margin) +
-  geom_area(aes(x = entry_date, y = margin_use), fill = "steelblue2") + 
-  theme_minimal() +
-  theme(plot.title = element_text(hjust = 0.5)) + 
-  scale_y_continuous(labels = scales::dollar) +
-  xlab("") +
-  ylab("Margin") +
-  ggtitle("Margin in Use")
-
-trade_counts <- tracking %>%
-  group_by(strategy) %>%
-  summarise(count = n())
-
-ggplot(trade_counts) +
-  geom_col(aes(x = strategy, y = count, fill = strategy)) +
-  theme_minimal() +
-  theme(plot.title = element_text(hjust = 0.5)) + 
-  scale_fill_brewer() +
-  xlab("") +
-  ylab("Count") +
-  ggtitle("# Trades Each Strategy")
-
-box_plot <- tracking %>%
-  filter(still_open == 0)
-
-ggplot(box_plot) +
-  geom_boxplot(aes(x = strategy, y = profit)) +
-  theme_minimal() +
-  theme(plot.title = element_text(hjust = 0.5)) + 
-  scale_y_continuous(labels = scales::dollar) +
-  xlab("") +
-  ylab("Profit") +
-  ggtitle("Distribution of Trades")
-
-getSymbols("SPY")
-
-spy <- as.data.frame(SPY) %>%
-  rownames_to_column(var = "date") %>%
-  mutate(date = as.Date(date, format = "%Y-%m-%d")) %>%
-  set_names(c("date", "open_price", "high_price", "low_price", "close_price",
-              "volume", "agjusted_price")) %>%
-  filter(date >= min(tracking$entry_date)) %>%
-  arrange(date) %>%
-  mutate(start = first(close_price)) %>%
-  mutate(daily_return = (close_price - lag(close_price)) / lag(close_price),
-         cum_return = (close_price - start) / start)
-
-ggplot(spy) +
-  geom_area(aes(x = date, y = cum_return), fill = "steelblue2") + 
-  geom_bar(aes(x = date, y = daily_return), stat = "identity") +
-  theme_minimal() +
-  theme(plot.title = element_text(hjust = 0.5)) + 
-  scale_y_continuous(labels = scales::percent) +
-  xlab("") +
-  ylab("Return %") +
-  ggtitle("Benchmark Return")
-
-realized_pnl <- tracking %>%
-  arrange(exit_date) %>%
-  mutate(cum_profit = cumsum(profit)) %>%
-  filter(!is.na(cum_profit)) %>%
-  top_n(-1, entry_date) %>%
-  distinct(cum_profit)
-
-wins <- tracking %>%
-  arrange(exit_date) %>%
-  filter(still_open == 0) %>%
-  mutate(profitable = case_when(
-    profit > 0 ~ 1,
-    TRUE ~ 0),
-    count = n(),
-    win_rate = sum(profitable, na.rm = TRUE) / count) %>%
-  distinct(win_rate)
-
-capital_in_use <- top_n(run_margin, n = 1, wt = entry_date)
-
-realized_pnl <- realized_pnl$cum_profit
-cumulative_return <- realized_pnl / max(run_margin$margin_use)
-win_rate <- wins$win_rate
-capital_in_use <- capital_in_use$margin_use
-
-summary <- data.frame(
-  realized_pnl = scales::dollar(realized_pnl),
-  cumulative_return = scales::percent(cumulative_return),
-  win_rate = scales::percent(win_rate),
-  capital_in_use = scales::dollar(capital_in_use)
-)
-
-kable(summary, digits = 2, format = "html",
-      caption = "Summary",
-      col.names = c("Ralized PnL", "Cumulative Return", 
-                    "Win Rate", "Capital In Use"),
-      escape = FALSE,
-      align = c("r", "r", "r", "r")) %>%
-  kable_styling(bootstrap_options = "striped", 
-                position = "center",
-                full_width = FALSE) %>%
-  column_spec(1:4, width = "1.5in")
-
 ```
 
 
