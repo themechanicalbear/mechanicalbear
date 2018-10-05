@@ -1,0 +1,347 @@
+---
+title: MACD - RSI - Short Puts
+author: Jason Taylor
+date: '2018-10-04'
+slug: macd-rsi-short-puts
+draft: FALSE
+categories:
+  - Original
+tags:
+  - backtest study
+  - options
+  - Original Content
+  - RSI
+  - rstats
+  - Short Put
+  - MACD
+topics: []
+description: ''
+---
+
+#### Summary:
+
+The intent for this post is to build technical analysis tools (RSI, MACD) into our studies and use them as entry points. We have selected a single entry criteria and exit target combination to build these functions. In future posts we can then use grid search to perform hyperparameter optimization of these entry and exit criteria and compare results with a baseline strategy. The goal of this post is not to evaluate the performance of the strategy but to continue with building tools that allow futher research.
+
+<!--more-->
+
+In addition we have created and used functions for calculating the running margin in use *tastytrade::margin_use* and calculating concurrent open positions *tastytrade::concurrent_trades* to enable limiting the number of positions opened in the same underlying at the same time.
+
+```{r global_options, include = TRUE, results = FALSE, echo = FALSE}
+knitr::opts_chunk$set(message = FALSE, tidy.opts = list(width.cutoff = 80))
+suppressWarnings(suppressMessages(suppressPackageStartupMessages({
+  library_list <- c("tidyverse", "tastytrade", "here", "TTR", "kableExtra",
+                    "knitr", "scales", "rlang", "tidyquant", "fuzzyjoin")
+  lapply(library_list, require, character.only = TRUE)})))
+```
+
+#### Study Setup:
+
+* Calculate the RSI(14) and MACD(12, 26, 9, SMA) for each underlying 
+
+* The entry criteria will be defined as:
+
+  * Sell 30 delta short puts when the RSI(14) crosses above 50
+  
+  * RSI(14) has been below 40 within the last 10 trading days
+  
+  * MACD is positive (12 SMA above the 26 SMA)
+
+* No new position is opened if there is an existing in the same underlying or it would cause the max margin in use to be exceeded
+
+* Positions are closed at 50% of max profit, 2X loss, or expiration, whichever comes first
+
+* The watch list is filtered to stocks without earnings to avoid binary events impacting results
+
+  * "DIA", "EEM", "EWJ", "EWW", "EWZ", "FXE", "FXI", "GDX", "IWM", "IYR", "QQQ", "SLV", "SPY", "TLT", "UNG", "USO", "XLB", "XLE", "XLF", "XLI", "XLK", "XLP", "XLU", "XLV", "XME", "XOP", "XRT"
+
+#### Study Arguments:
+
+```{r arguments, echo = FALSE} 
+watch_list <- read.csv(paste0(here::here(), "/data/watch_list.csv"),
+                       skip = 3) %>%
+  filter(Symbol %in% c("DIA", "EEM", "EWJ", "EWW", "EWZ", "FXE", "FXI", "GDX",
+                       "IWM", "IYR", "QQQ", "SLV", "SPY", "TLT", "UNG", "USO",
+                       "XLB", "XLE", "XLF", "XLI", "XLK", "XLP", "XLU", "XLV",
+                       "XME", "XOP", "XRT"))
+
+args <- expand.grid(symbol = watch_list$Symbol,
+                    tar_dte = 60,
+                    tar_buffer = NA,
+                    tar_delta = -0.30,
+                    stringsAsFactors = FALSE)
+
+tar_profit <- 0.5
+stop_loss <- -2.0
+margin_limit <- 10000
+margin_contract <- 2000
+min_entry_roc <- 0.015
+min_entry_credit <- 0.40
+margin_percent <- 20
+rsi_cross <- 50
+rsi_recent_low <- 40
+```
+
+* Target DTE: `r args[1, "tar_dte"]`
+
+* Target Delta: `r args[1, "tar_delta"]`
+
+* Maximum Margin in Use: `r dollar(margin_limit)`
+
+* Maximum Margin per Contract: `r dollar(margin_contract)`
+
+* Minimum Return on Capital (ROC) at Entry: `r percent(min_entry_roc)`
+
+* Minimum Credit Recieved per Contract: `r min_entry_credit`
+
+* Percent of Stock Price used for Margin: `r percent(margin_percent / 100)`
+
+#### Study Function:
+
+```{r study}
+study <- function(stock, tar_dte, tar_buffer, tar_delta) {
+  rs_conn <- tastytrade::redshift_connect("TASTYTRADE")
+  options <- rs_conn %>%
+    tbl(stock) %>%
+    mutate(m_dte = abs(dte - tar_dte))
+  
+  study_entries <- options %>%
+    distinct(symbol, quotedate, close_price) %>%
+    collect() %>%
+    arrange(quotedate) %>%
+    mutate(quotedate = as.Date(quotedate, format = "%Y-%m-%d"),
+           rsi = RSI(close_price, n = 14),
+           !!!tastytrade::lags(rsi, 10)) %>%
+    tq_mutate_xy_(x = "close_price", mutate_fun = "MACD", 
+                  nFast = 12, nSlow = 26, nSig = 9,
+                  maType = SMA, percent = FALSE) %>%
+    mutate(trigger = case_when(macd > signal ~ 1, TRUE ~ 0)) %>%
+    filter(rsi > rsi_cross, 
+           lag_rsi_01 < rsi_cross,
+           trigger == 1) %>%
+    filter_at(vars(starts_with("lag_rsi")), any_vars((. < rsi_recent_low)))
+  
+  opened_puts <- tastytrade::open_leg(
+    data = filter(options, quotedate %in% study_entries$quotedate),
+    put_call = "put",
+    direction = "credit",
+    tar_delta = tar_delta,
+    tar_buffer = tar_buffer)
+  
+  pmap_dfr(list(df = list(options), 
+                entry_date = as.character(opened_puts$quotedate),
+                exp = as.character(opened_puts$expiration), 
+                typ = list("put"),
+                stk = opened_puts$strike,
+                entry_mid = opened_puts$mid,
+                entry_delta = opened_puts$put_delta_strike,
+                stk_price = opened_puts$close_price,
+                direction = list("short")),
+           tastytrade::close_leg)
+}
+```
+
+#### Map Study Function:
+
+```{r runLive, echo = TRUE, eval = FALSE}
+results <- pmap_dfr(list(args$symbol, args$tar_dte, args$tar_buffer,
+                         args$tar_delta), study)
+```
+
+```{r readResults, echo = FALSE}
+#saveRDS(results, file = "blog_results.RDS")
+results <- readRDS(paste0(here::here(), "/content/post/blog_results.RDS"))
+```
+
+#### Filter results to 50% profit, 2X loss, or expiration whichever comes first
+
+```{r}
+first_exit <- results %>%
+  filter(entry_stock_price < 100,
+         put_entry_mid >= min_entry_credit) %>%
+  mutate(entry_margin = margin_percent * entry_stock_price,
+         contracts = floor(margin_contract / entry_margin),
+         entry_margin = entry_margin * contracts,
+         put_entry_mid = 100 * put_entry_mid,
+         put_exit_mid = 100 * put_exit_mid,
+         put_profit = 100 * put_profit,
+         entry_roc = (put_entry_mid * contracts) / entry_margin,
+         tar_prof_hit =
+           case_when(put_profit >= (put_entry_mid * tar_profit) ~ 1,
+                     TRUE ~ 0),
+         tar_loss_hit = 
+           case_when(put_profit <= (put_entry_mid * stop_loss) ~ 1,
+                     TRUE ~ 0),
+         put_profit = case_when(
+           tar_prof_hit == 1 ~ put_entry_mid * tar_profit * contracts,
+           tar_loss_hit == 1 ~ put_entry_mid * stop_loss * contracts,
+           TRUE ~ put_profit)) %>%
+  group_by(symbol, entry_date) %>%
+  filter(quotedate == expiration |
+           tar_prof_hit == 1 | 
+           tar_loss_hit == 1) %>%
+  filter(quotedate == min(quotedate)) %>%
+  ungroup() %>%
+  filter(entry_roc >= min_entry_roc) %>%
+  mutate(profitable = case_when(put_profit > 0 ~ 1, TRUE ~ 0)) %>%
+  group_by(symbol) %>%
+  mutate(num = n()) %>%
+  ungroup()
+```
+
+#### Calculate Concurrent Positions:
+
+As a requirement of the study we will not open multiple trades in the same underlying so we must calculate entries that overlap and can be filtered out.
+
+```{r}
+concurrent <- pmap_dfr(list(first_exit$symbol,
+                                   as.character(first_exit$entry_date), 
+                                   as.character(first_exit$quotedate)), 
+                              tastytrade::concurrent_trades) %>%
+  group_by(symbol, quote_date) %>%
+  summarise(con_pos = n())
+
+first_exit <- left_join(first_exit, concurrent, 
+                        by = c("symbol", "entry_date" = "quote_date")) %>%
+  filter(con_pos == 1)
+```
+
+#### Calulate Margin in Use:
+
+Another requirement of the study is that we do not exceed the maximum margin in use of `r dollar(margin_limit)`. Here we calculate the running margin to check if a new position in any underyling would push above this limit. If so, we will skip this trade. 
+
+This last filter will give us the final list of trade executions so we can calculate the cummulative profit for the study.
+
+```{r}
+run_margin <-
+  pmap_dfr(list(first_exit$symbol,
+                as.character(first_exit$entry_date), 
+                as.character(first_exit$quotedate), 
+                first_exit$entry_margin), 
+           tastytrade::margin_use) %>%
+  group_by(entry_date) %>%
+  summarise(margin_use = sum(margin, na.rm = TRUE))
+
+first_exit <- left_join(first_exit, run_margin, by = "entry_date") %>%
+  filter(margin_use < margin_limit) %>%
+  arrange(entry_date) %>%
+  mutate(run_profit = cumsum(put_profit))
+```
+
+#### Calculate metrics for all trades combined:
+
+```{r}
+total_metrics <- first_exit %>%
+  mutate(num_trades = n(),
+         mean_profit = mean(put_profit),
+         profit = sum(put_profit),
+         max_profit = case_when(
+           max(put_profit) > 0 ~ max(put_profit),
+           TRUE ~ 0),
+         max_loss = case_when(
+           min(put_profit) < 0 ~ min(put_profit),
+           TRUE ~ 0),
+         win_rate = sum(profitable) / num_trades,
+         rate_prof_tar = sum(tar_prof_hit) / num_trades,
+         rate_loss_tar = sum(tar_loss_hit) / num_trades,
+         rate_exp = (num_trades - sum(tar_prof_hit) - sum(tar_loss_hit)) /
+           num_trades) %>%
+  distinct(num_trades, mean_profit,
+           profit, max_profit, max_loss, win_rate,
+           rate_prof_tar, rate_loss_tar, rate_exp) %>%
+  mutate(win_rate = percent(win_rate),
+         mean_profit = dollar(mean_profit),
+         profit = dollar(profit),
+         max_loss = case_when(
+           max_loss < 0 ~ cell_spec(dollar(max_loss), color = "red", italic = TRUE),
+           TRUE ~ dollar(max_loss)),
+         max_profit = dollar(max_profit),
+         rate_prof_tar = percent(rate_prof_tar),
+         rate_loss_tar = percent(rate_loss_tar),
+         rate_exp = percent(rate_exp))
+```
+
+
+```{r}
+kable(total_metrics, digits = 2, format = "html",
+      caption = "Summary Total Results",
+      col.names = c("Num Trades", "Mean Profit", "Total Profit", "Max Profit",
+                    "Max Loss", "Win Rate", "% Prof Tar", "% Loss Lim", "% Exp"),
+      escape = FALSE,
+      align = rep("l", 9)) %>%
+  kable_styling(bootstrap_options = "striped", position = "center",
+                full_width = FALSE) %>%
+  column_spec(1:9, width = "1.5in")
+```
+
+#### Calculate metrics for trades grouped by symbol:
+
+```{r}
+symbol_metrics <- first_exit %>%
+  group_by(symbol) %>%
+  mutate(num_trades = n(),
+         mean_profit = mean(put_profit),
+         symbol_profit = sum(put_profit),
+         max_profit = case_when(
+           max(put_profit) > 0 ~ max(put_profit),
+           TRUE ~ 0),
+         max_loss = case_when(
+           min(put_profit) < 0 ~ min(put_profit),
+           TRUE ~ 0),
+         win_rate = sum(profitable) / num_trades) %>%
+  ungroup() %>%
+  distinct(symbol, num_trades, mean_profit, max_profit, max_loss,
+           symbol_profit, win_rate) %>%
+  arrange(symbol) %>%
+  mutate(mean_profit = case_when(
+    mean_profit < 0 ~ cell_spec(dollar(mean_profit), color = "red", italic = TRUE),
+    TRUE ~ dollar(mean_profit)),
+    symbol_profit = case_when(
+      symbol_profit < 0 ~ cell_spec(dollar(symbol_profit), color = "red", italic = TRUE),
+      TRUE ~ dollar(symbol_profit)),
+    max_profit = dollar(max_profit),
+    max_loss = case_when(
+      max_loss < 0 ~ cell_spec(dollar(max_loss), color = "red", italic = TRUE),
+      TRUE ~ dollar(max_loss)),
+    win_rate = percent(win_rate))
+```
+
+```{r}
+kable(symbol_metrics, digits = 2, format = "html",
+      caption = "Summary Results",
+      col.names = c("Symbol", "Num Trades", "Mean Profit", "Total Profit",
+                    "Max Profit", "Max Loss", "Win Rate"),
+      escape = FALSE,
+      align = rep("l", 7)) %>%
+  kable_styling(bootstrap_options = "striped", position = "center",
+                full_width = FALSE) %>%
+  column_spec(1:7, width = "1.5in")
+```
+
+```{r}
+ggplot(data = first_exit, aes(x = entry_date, y = run_profit)) +
+  geom_line() +
+  geom_hline(yintercept = 0, linetype = "dotted", color = "blue", size = 1.5) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  scale_y_continuous(labels = scales::dollar) +
+  xlab("Entry Date") +
+  ylab("Profit") +
+  ggtitle("Cumulative Return")
+```
+
+```{r}                            
+ggplot(distinct(first_exit, entry_date, margin_use)) +
+  geom_area(aes(x = entry_date, y = margin_use), fill = "steelblue2") + 
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  scale_y_continuous(labels = scales::dollar) +
+  xlab("") +
+  ylab("Margin") +
+  ggtitle("Margin in Use")                             
+
+```
+
+*If you have suggestions for studies, improvements for rstats code, or any other feedback please reach out with the contact links on the sidebar*
+
+#### Best,
+#### Jason
