@@ -18,7 +18,7 @@ theme = "blackburn"
   subtitle = "Jason Taylor"
   brand = "![Test](/img/metallic_logo.png)"
   googleAnalytics = "Your Google Analytics tracking ID"
-  #disqus = "Your Disqus shortname"
+  disqus = "mechanicalbear"
   # CSS name for highlight.js
   #highlightjs = "github"
   #highlightjs = "androidstudio"
