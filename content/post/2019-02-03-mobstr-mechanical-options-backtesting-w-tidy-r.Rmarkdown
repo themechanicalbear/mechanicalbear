@@ -11,7 +11,7 @@ tags:
   - backtest study
   - options
   - Original Content
-  - RSI
+  - SMA
   - Short Put
   - rstats
 topics: []
@@ -45,7 +45,7 @@ TBD
 knitr::opts_chunk$set(message = FALSE, tidy.opts = list(width.cutoff = 60))
 suppressWarnings(suppressMessages(suppressPackageStartupMessages({
   library_list <- c("tidyverse", "mobstr", "here", "TTR", "DBI",
-                    "formattable", "kableExtra", "knitr", "scales")
+                    "formattable", "kableExtra", "knitr", "scales", "gt")
   lapply(library_list, require, character.only = TRUE)})))
 args <- expand.grid(symbol = c("SPY", "IWM", "GLD", "QQQ", "DIA",
                                "TLT", "XLE", "EEM", "EWZ", "FXE"),
@@ -240,7 +240,7 @@ metrics %>%
   ggtitle("Total Profit distributions for each symbol")
 ```
 
-#### Calculate metrics for RSI cross-over entries  
+#### Calculate metrics for SMA cross-over entries  
 
 * Trade Count
 * Win Rate
@@ -251,7 +251,7 @@ metrics %>%
 ```{r}
 sma_results <- results %>%
   group_by(symbol) %>%
-    filter(sma_20_lag < sma_50_lag,
+  filter(sma_20_lag < sma_50_lag,
          sma_20 > sma_50) %>%
   ungroup()
 
@@ -260,29 +260,30 @@ sma_metrics <- sma_results %>%
   mutate(trade_count = n(),
          profitable = ifelse(put_profit > 0, 1, 0),
          win_rate = sum(profitable) / trade_count,
-         mean_credit = dollar(mean(put_entry_mid * 100)),
+         mean_credit = mean(put_entry_mid * 100),
          mean_profit = mean(put_profit * 100),
-         mean_profit = ifelse(mean_profit < 0, 
-                              cell_spec(dollar(mean_profit), 
-                                        color = "red", italic = TRUE),
-                              dollar(mean_profit)),
-         total_profit = sum(put_profit * 100),
-         total_profit = ifelse(total_profit < 0, 
-                               cell_spec(dollar(total_profit), 
-                                         color = "red", italic = TRUE),
-                               dollar(total_profit))) %>%
+         total_profit = sum(put_profit * 100)) %>%
   distinct(symbol, trade_count, win_rate, mean_credit, 
            mean_profit, total_profit) %>%
   ungroup() %>%
-  arrange(desc(win_rate)) %>%
-  mutate(win_rate = percent(win_rate))
+  arrange(desc(win_rate)) #%>%
+  # mutate(win_rate = percent(win_rate)) %>%
+  # mutate(mean_credit = dollar(mean_credit),
+  #        mean_profit = ifelse(mean_profit < 0, 
+  #                             cell_spec(dollar(mean_profit), 
+  #                                       color = "red", italic = TRUE),
+  #                             dollar(mean_profit)),
+  #        total_profit = ifelse(total_profit < 0, 
+  #                              cell_spec(dollar(total_profit), 
+  #                                        color = "red", italic = TRUE),
+  #                              dollar(total_profit)))
 ```
 
-#### Metrics table for RSI cross-over entries  
+#### Metrics table for SMA cross-over entries  
 
 ```{r metrics}
 kable(sma_metrics, digits = 2, format = "html",
-      caption = "Metrics for selling puts after cross above RSI 30",
+      caption = "Metrics for selling puts after cross above SMA",
       col.names = c("SYM", "TRADE COUNT", "WIN RATE", "MEAN CREDIT",
                     "MEAN PROFIT", "TOTAL PROFIT"),
       escape = FALSE,
@@ -292,7 +293,7 @@ kable(sma_metrics, digits = 2, format = "html",
   column_spec(., 1:6, width = "1.0in")
 ```
 
-#### Does RSI cross-over improve results?  
+#### Does SMA cross-over improve results?  
 
 ```{r}
 compare <- sma_results %>%
@@ -331,7 +332,7 @@ compare <- sma_results %>%
 
 ```{r table2}
 kable(compare, digits = 2, format = "html",
-      caption = "How does using RSI compare to random entries?",
+      caption = "How does using SMA compare to random entries?",
       col.names = c("SYM", "Win Rate", "Mean Profit", "Total Profit",
                     "Win Rate Rank", "Mean Profit Rank", "Total Profit Rank"),
       escape = FALSE,
@@ -340,7 +341,7 @@ kable(compare, digits = 2, format = "html",
                 full_width = FALSE) %>%
   column_spec(1:7, width = "1.0in") %>%
   column_spec(5:7, bold = TRUE, color = "white", background = "orange") %>%
-  add_header_above(., c("", "RSI Cross Entries" = 3, "Rank Against all 1000" = 3))
+  add_header_above(., c("", "SMA Cross Entries" = 3, "Rank Against all 1000" = 3))
 ```
 
 *If you have suggestions for studies, improvements for rstats code, or any other feedback please reach out with the contact links on the sidebar*
