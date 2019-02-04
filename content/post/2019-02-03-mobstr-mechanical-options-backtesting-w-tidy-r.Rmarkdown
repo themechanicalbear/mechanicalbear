@@ -293,6 +293,42 @@ kable(sma_metrics, digits = 2, format = "html",
   column_spec(., 1:6, width = "1.0in")
 ```
 
+#### Metrics table for SMA cross-over entries  
+
+```{r metrics_gt}
+# gt version
+
+gt(sma_metrics) %>%
+  gt::tab_header(title = "Metrics for selling puts after cross above SMA") %>%
+  gt::fmt_percent(columns = vars(win_rate)) %>%
+     gt::data_color(
+    columns = vars(mean_credit, mean_profit, total_profit),
+    colors = scales::col_numeric(
+      palette = c(
+        "red"),
+      domain = c(-10000, 0))
+  ) %>%
+  gt::fmt_currency(
+    columns = vars(mean_credit, mean_profit, total_profit),
+    currency = "USD"
+  )
+ 
+
+
+
+
+
+kable(sma_metrics, digits = 2, format = "html",
+      caption = "Metrics for selling puts after cross above SMA",
+      col.names = c("SYM", "TRADE COUNT", "WIN RATE", "MEAN CREDIT",
+                    "MEAN PROFIT", "TOTAL PROFIT"),
+      escape = FALSE,
+      align = c("l", "r", "r", "r", "r", "r")) %>%
+  kable_styling(bootstrap_options = "striped",
+                full_width = FALSE) %>%
+  column_spec(., 1:6, width = "1.0in")
+```
+
 #### Does SMA cross-over improve results?  
 
 ```{r}
