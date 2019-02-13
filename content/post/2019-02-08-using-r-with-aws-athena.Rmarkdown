@@ -30,7 +30,7 @@ description: ''
 
 <br>
 
-### Step 1:
+### User Account Step 1:
 
 * Log into AWS site and navigate to the IAM Management Console found under the (Security, Identity, & Compliance) section
 * Next goto Users and Choose Add User
@@ -42,7 +42,7 @@ description: ''
 
 <br>
 
-### Step 2:
+### User Account Step 2:
 
 > Create a group so that you can assign the same permissions to additional users in the future
 
@@ -52,7 +52,7 @@ description: ''
 
 <br>
 
-### Step 3:
+### User Account Step 3:
 
 * In this example I created a group named "blogger"
 * Assign the following roles
@@ -66,7 +66,7 @@ description: ''
 
 <br>
 
-### Step 4:
+### User Account Step 4:
 
 > Make sure to add the new user to the group you just created
 
@@ -74,7 +74,7 @@ description: ''
 
 <br>
 
-### Step 5:
+### User Account Step 5:
 
 * The last step #5 shows that you successfully created the new user and provides you with the accounts Access key ID and Secret access key
 * <b>Write these down the access key will be available in the user account details screen but the secret key is only shown here and will need to be reset once you leave this screen if you loose it.</b>
@@ -93,7 +93,7 @@ description: ''
 
 <br>
 
-### Step 1:
+### S3 Bucket Step 1:
 
 * Navigate to the S3 Console found under the (Storage) section
 * Choose create bucket
@@ -102,7 +102,7 @@ description: ''
 
 <br>
 
-### Step 2:
+### S3 Bucket Step 2:
 
 * Give the bucket a unique and informative name
 * Take note of the region you are working in in this case US West Oregon
@@ -112,7 +112,7 @@ description: ''
 
 <br>
 
-### Step 3:
+### S3 Bucket Step 3:
 
 > You can choose versioning, logs, etc, but I've left them all blank for this example
 
@@ -120,7 +120,7 @@ description: ''
 
 <br>
 
-### Step 4:
+### S3 Bucket Step 4:
 
 > Enable the 4 check boxes for keeping the bucket private if they are not already set
 
@@ -128,7 +128,7 @@ description: ''
 
 <br>
 
-### Step 5:
+### S3 Bucket Step 5:
 
 > Review the settings you chose and click Create bucket to complete the process
 
@@ -136,7 +136,7 @@ description: ''
 
 <br>
 
-### Step 6:
+### S3 Bucket Step 6:
 
 > Back on the S3 console you will now see the new bucket including that it is private, and in the US West region
 
@@ -258,6 +258,56 @@ mobstr::athena_load(athena, "default", "blog-s3-test-example", "mtcars", mtcars)
 
 <br>
 
+#### mobstr Function Code: 
+
+* This package is in development as Mechanical Options Backtesting System w/ Tidy R (mobstr) so I'll include the code here so that you will not need to load the package to follow this process.
+
+```{r}
+# mobstr::write_2_S3
+write_2_S3 <- function(file, path, bucket) {
+  file_path <- paste0(path, file, ".csv")
+  file_name <- paste0(file, ".csv")
+  bucket_name <- paste0(bucket, "/", file)
+  region_name <- Sys.getenv("AWS_S3_REGION")
+
+  aws.s3::put_bucket(bucket_name)
+
+  aws.s3::put_object(file = file_path,
+                     object = file_name,
+                     bucket = bucket_name,
+                     region = region_name)
+}
+
+# mobstr::athena_connect
+athena_connect <- function(database) {
+  DBI::dbConnect(
+    odbc::odbc(),
+    driver = Sys.getenv("AWS_ATHENA_DRIVER_FILE"),
+    Schema = database,
+    AwsRegion = Sys.getenv("AWS_DEFAULT_REGION"),
+    UID = Sys.getenv("AWS_ACCESS_KEY_ID"),
+    PWD = Sys.getenv("AWS_SECRET_ACCESS_KEY"),
+    S3OutputLocation = Sys.getenv("AWS_ATHENA_S3_OUTPUT")
+  )
+}
+
+# mobstr::athena_load
+athena_load <- function(conn, database, s3_bucket, name, df) {
+  table_vars <- paste0("`", names(df), "` ", sapply(df, typeof), ",", collapse = '')
+  table_vars <- sub(",$", "", table_vars)
+
+  # SQL create table statement in Athena
+  DBI::dbExecute(conn, paste0("CREATE EXTERNAL TABLE IF NOT EXISTS ",
+                              database, ".", name, " (", table_vars, " )",
+                              "ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe'",
+                              "WITH SERDEPROPERTIES ('serialization.format' = ',', 'field.delim' = ',' )",
+                              "LOCATION 's3://", s3_bucket, "/", name, "/'",
+                              "TBLPROPERTIES ('has_encrypted_data'='false', 'skip.header.line.count'='1');"))
+}
+```
+
+<br>
+
 ***
 
 <center><h2>That's It, did it work?.....</h2></center>
@@ -282,9 +332,9 @@ knitr::kable(athena_cars, digits = 2, format = "html",
                            "VS", "AM", "GEAR", "CARB"),
              escape = FALSE,
              align = rep("r", 11)) %>%
-  kableExtra::kable_styling(bootstrap_options = "striped", position = "center",
+  kableExtra::kable_styling(., bootstrap_options = "striped", position = "center",
                             full_width = FALSE) %>%
-  kableExtra::column_spec(1:11, width = "1.5in")
+  kableExtra::column_spec(., 1:11, width = "1.5in")
 ```
 
 <br>
