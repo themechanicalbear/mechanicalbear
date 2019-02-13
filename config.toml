@@ -17,9 +17,8 @@ theme = "blackburn"
   # Shown in the home page
   subtitle = "Jason Taylor"
   brand = "![Test](/img/metallic_logo.png)"
-  googleAnalytics = "Your Google Analytics tracking ID"
+  googleAnalytics = "YUA-134447811-1"
   disqusShortname = "mechanicalbear-1"
-  url = "https://blog.themechanicalbear.com"
   # CSS name for highlight.js
   #highlightjs = "github"
   #highlightjs = "androidstudio"
