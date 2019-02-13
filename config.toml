@@ -17,7 +17,7 @@ theme = "blackburn"
   # Shown in the home page
   subtitle = "Jason Taylor"
   brand = "![Test](/img/metallic_logo.png)"
-  googleAnalytics = "YUA-134447811-1"
+  googleAnalytics = "UA-134447811-1"
   disqusShortname = "mechanicalbear-1"
   # CSS name for highlight.js
   #highlightjs = "github"
