@@ -1,6 +1,8 @@
 # mechanicalbear
 blog
 
+https://blog.themechanicalbear.com
+
 Create a new post:
 * Use the RStudio addin "Blogdown New Post"
 * Use rMarkdown file format
